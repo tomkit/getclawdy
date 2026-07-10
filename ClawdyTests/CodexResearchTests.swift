@@ -240,6 +240,22 @@ struct CodexResearchExecutePromptTests {
         #expect(prompt.contains("/tmp/run/report.html"))
         #expect(prompt.lowercased().contains("self-contained") || prompt.contains("inline <style>"))
     }
+
+    // Parity with the Claude execute prompt: Codex must NOT open/fetch/verify image
+    // URLs before embedding (redundant with the post-write ResearchImageValidator, and
+    // a fetch of a raw image binary just wastes a tool call). It embeds directly and
+    // relies on the automatic post-write placeholder swap for broken images.
+    @Test func executePromptDoesNotInstructImagePreFetching() {
+        let prompt = CodexResearchEngine.composeExecutePrompt(
+            task: "show me the best national parks",
+            outputFileAbsolutePath: "/tmp/run/report.html",
+            clarificationAnswers: nil
+        ).lowercased()
+        #expect(prompt.contains("do not open, fetch, or otherwise verify image"))
+        #expect(prompt.contains("handled automatically"))
+        // Direct embedding of remote images is still permitted.
+        #expect(prompt.contains("<img src=\"https://"))
+    }
 }
 
 struct CodexResearchExecuteLifecycleTests {

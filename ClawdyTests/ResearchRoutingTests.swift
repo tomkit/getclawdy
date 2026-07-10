@@ -326,6 +326,39 @@ struct ResearchArgumentsTests {
         #expect(prompt.contains("inline <style>"))
     }
 
+    // HTTP-400 regression: WebFetch against a raw image binary returns HTTP 400, so
+    // the old "WebFetch a candidate image URL before embedding it" instruction made
+    // every image pre-check a failing round-trip — and it's redundant, since the
+    // deterministic post-write ResearchImageValidator already swaps broken images.
+    // The execute SYSTEM prompt + user message MUST NOT tell the model to fetch/verify
+    // image URLs before embedding them; they MUST tell it to embed directly and that
+    // broken images are handled automatically. (WebFetch stays allowed for page content.)
+    @Test func executeSystemPromptDoesNotInstructImagePreFetching() {
+        let prompt = ClaudeResearchEngine.executeSystemPrompt.lowercased()
+        // No pre-embed fetch/verify of image URLs.
+        #expect(!prompt.contains("webfetch a candidate image"))
+        #expect(!prompt.contains("webfetching them first"))
+        #expect(!prompt.contains("confirmed are reachable"))
+        // Positive guidance: embed directly, broken images handled automatically.
+        #expect(prompt.contains("do not webfetch"))
+        #expect(prompt.contains("handled automatically"))
+        // WebFetch remains available for actual page/content research.
+        #expect(prompt.contains("webfetch"))
+    }
+
+    @Test func executeUserMessageDoesNotInstructImagePreFetching() {
+        let message = ClaudeResearchEngine.composeExecuteUserMessage(
+            outputFileAbsolutePath: "/tmp/run/report.html",
+            clarificationAnswers: nil
+        ).lowercased()
+        #expect(!message.contains("webfetching them first"))
+        #expect(!message.contains("confirmed are reachable"))
+        #expect(message.contains("do not webfetch"))
+        #expect(message.contains("handled automatically"))
+        // WebFetch still permitted for page content.
+        #expect(message.contains("webfetch"))
+    }
+
     // Background-delegation guard: the plan-phase `claude -p` runs the user's OWN
     // customizations (no --safe-mode by default), so it can load a deep-research skill
     // / Workflow plugin and LAUNCH IT AS A BACKGROUND TASK — which never resumes in a
