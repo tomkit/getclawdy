@@ -13,8 +13,12 @@
 //      WITHOUT `.stationary`.
 //  All three still share the invariant flags (borderless + non-activating style,
 //  `.statusBar` level, transparent, `hidesOnDeactivate == false`, all-Spaces +
-//  full-screen-auxiliary collection behavior, excluded from the Windows menu, and —
-//  critically — `sharingType == .none`).
+//  full-screen-auxiliary collection behavior, and excluded from the Windows menu).
+//  `sharingType` is now MODE-AWARE rather than always `.none`: the factory reads the
+//  "Show Clawdy in screen recordings" (Recording Mode) setting at construction, so a
+//  panel is `.none` (hidden from external recorders — the default) when the mode is
+//  off and `.readOnly` (visible to recorders, for demos) when it's on. Tests that
+//  assert a specific value force the mode explicitly via `withRecordingMode`.
 //
 
 import Testing
@@ -137,23 +141,44 @@ struct ResearchOverlayPanelFactoryTests {
     /// The live detail panel the stacked overlay actually builds must be a
     /// `KeyableResearchPanel` (via the real render path, not just the factory in
     /// isolation) — so a future change to `makeKeyableDetailPanel` can't silently drop
-    /// the keyable subclass.
+    /// the keyable subclass. Its `sharingType` is Recording-Mode-aware, so the
+    /// assertion forces the mode explicitly rather than depending on the ambient
+    /// default: `.none` when off (the default), `.readOnly` when on.
     @Test func renderedDetailPanelIsKeyableResearchPanel() {
-        let controller = ResearchStackedOverlayController.offscreenForTesting()
-        let viewModel = ResearchProgressOverlayViewModel()
-        viewModel.phase = .running
-        viewModel.taskDescription = "research detail"
-        viewModel.statusLine = "Planning the research…"
-        viewModel.isCancellable = true
-        let pill = ResearchStackPillModel(id: "detail-keyable", viewModel: viewModel, isFocused: true)
-        controller.render(pills: [pill], controlRow: nil, detailViewModel: viewModel)
-        defer { controller.hide() }
+        withRecordingMode(false) {
+            let controller = ResearchStackedOverlayController.offscreenForTesting()
+            let viewModel = ResearchProgressOverlayViewModel()
+            viewModel.phase = .running
+            viewModel.taskDescription = "research detail"
+            viewModel.statusLine = "Planning the research…"
+            viewModel.isCancellable = true
+            let pill = ResearchStackPillModel(id: "detail-keyable-off", viewModel: viewModel, isFocused: true)
+            controller.render(pills: [pill], controlRow: nil, detailViewModel: viewModel)
+            defer { controller.hide() }
 
-        let detailPanel = controller.detailPanelForTesting
-        #expect(detailPanel is KeyableResearchPanel,
-                "the chat detail panel must be a KeyableResearchPanel so its text input can accept typing")
-        #expect(detailPanel?.hasShadow == false)
-        #expect(detailPanel?.collectionBehavior.contains(.stationary) == true)
-        #expect(detailPanel?.sharingType == NSWindow.SharingType.none)
+            let detailPanel = controller.detailPanelForTesting
+            #expect(detailPanel is KeyableResearchPanel,
+                    "the chat detail panel must be a KeyableResearchPanel so its text input can accept typing")
+            #expect(detailPanel?.hasShadow == false)
+            #expect(detailPanel?.collectionBehavior.contains(.stationary) == true)
+            #expect(detailPanel?.sharingType == NSWindow.SharingType.none,
+                    "Recording Mode OFF → the rendered detail panel is hidden from recorders (.none)")
+        }
+
+        // Recording Mode ON → the same rendered detail panel is visible to recorders.
+        withRecordingMode(true) {
+            let controller = ResearchStackedOverlayController.offscreenForTesting()
+            let viewModel = ResearchProgressOverlayViewModel()
+            viewModel.phase = .running
+            viewModel.taskDescription = "research detail"
+            viewModel.statusLine = "Planning the research…"
+            viewModel.isCancellable = true
+            let pill = ResearchStackPillModel(id: "detail-keyable-on", viewModel: viewModel, isFocused: true)
+            controller.render(pills: [pill], controlRow: nil, detailViewModel: viewModel)
+            defer { controller.hide() }
+
+            #expect(controller.detailPanelForTesting?.sharingType == .readOnly,
+                    "Recording Mode ON → the rendered detail panel is visible to recorders (.readOnly)")
+        }
     }
 }

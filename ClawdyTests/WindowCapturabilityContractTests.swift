@@ -10,9 +10,16 @@
 //     be CAPTURABLE — `sharingType == .readOnly`. This has regressed before: when the
 //     results window was `.none`, Clawdy could not screenshot the very page it just
 //     produced, so a spoken follow-up "about the page" saw nothing.
-//   • ALL transient CHROME (the stacked research overlay, its detail panel, the cursor/
-//     response overlay, the clarify panel, the menu-bar panel) MUST be NON-capturable —
-//     `sharingType == .none` — so it never leaks into a screenshot sent to the model.
+//   • The transient CHROME's capturability is now MODE-AWARE, governed by the "Show
+//     Clawdy in screen recordings" (Recording Mode) setting. When it's OFF (the
+//     default) the stacked research overlay, its detail panel, the clarify panel, and
+//     the cursor/response overlay are `.none` (NON-capturable) so nothing leaks into a
+//     screenshot sent to the model; when it's ON they become `.readOnly` (visible to
+//     external recorders, for demos). The menu-bar panel is deliberately excluded from
+//     the flip and stays `.none` always (its settings must never leak into a demo).
+//     Either way, chrome never reaches Clawdy's OWN model screenshots, which
+//     app-exclude Clawdy regardless of `sharingType`. Mode-specific tests force the
+//     mode explicitly via `withRecordingMode`.
 //
 //  These tests pin both sides so a future change can't silently flip either. They are
 //  strictly additive: no production code is changed. Surfaces without a headless test
@@ -190,14 +197,18 @@ struct WindowCapturabilityContractTests {
         }
     }
 
-    /// DOCUMENTATION (not an assertion target): chrome surfaces that ALSO must be `.none`
-    /// but cannot be pinned here because they expose no headless test seam — their panels
-    /// are private and the sharing type is set inside a private `show()`/`create…()`
-    /// method, so reaching them would require adding a production accessor (out of scope
-    /// for this test-only change):
-    ///   • ResearchClarificationPanelManager — private `panel`, `.none` set in `show()`.
-    ///   • MenuBarPanelManager                — private `panel`; constructing the manager
-    ///     also needs a `CompanionManager` and spawns an `NSStatusItem`.
+    /// DOCUMENTATION (not an assertion target): chrome surfaces that cannot be pinned
+    /// here because they expose no headless test seam — their panels are private and the
+    /// sharing type is set inside a private `show()`/`create…()` method, so reaching them
+    /// would require adding a production accessor (out of scope for this test-only
+    /// change):
+    ///   • ResearchClarificationPanelManager — private `panel`, built via the shared
+    ///     `ResearchToastPanel.makeOverlayPanel`, so its `sharingType` is MODE-AWARE
+    ///     (`.none` when Recording Mode off, `.readOnly` when on) like the other research
+    ///     chrome; the factory itself is pinned in `ResearchOverlayPanelFactoryTests`.
+    ///   • MenuBarPanelManager                — private `panel`, `.none` ALWAYS (excluded
+    ///     from the Recording Mode flip); constructing the manager also needs a
+    ///     `CompanionManager` and spawns an `NSStatusItem`.
     /// These are asserted-by-source-review only; if a seam is added later, fold them into
     /// `windowCapturabilityContractHoldsAcrossInstantiableSurfaces`.
     static let capturabilityContractSkippedSurfaces = [
