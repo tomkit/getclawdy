@@ -750,6 +750,31 @@ final class CompanionManager: ObservableObject {
         }
     }
 
+    /// "Show Clawdy in screen recordings" (Recording Mode). When true, Clawdy's
+    /// on-screen overlays — the cursor, annotation strokes, and research chrome —
+    /// are visible to EXTERNAL screen recorders (for demos); when false (the
+    /// default) they stay invisible to capture. This ONLY flips the overlay
+    /// windows' `sharingType`; it NEVER affects Clawdy's own model screenshots,
+    /// which always exclude Clawdy's windows at the application level. Persisted to
+    /// UserDefaults; `didSet` reassigns `sharingType` on already-on-screen overlays
+    /// so the toggle applies without a relaunch (new windows read it at
+    /// construction). Not `private(set)` so the panel's Toggle can bind to it.
+    @Published var isRecordingModeEnabled: Bool =
+        UserDefaults.standard.bool(forKey: .recordingModeEnabled) {
+        didSet {
+            UserDefaults.standard.set(isRecordingModeEnabled, forKey: .recordingModeEnabled)
+            overlayWindowManager.applyRecordingModeSharingType(recordingEnabled: isRecordingModeEnabled)
+            ResearchToastPanel.applyRecordingModeToLivePanels(recordingEnabled: isRecordingModeEnabled)
+        }
+    }
+
+    /// Sets Recording Mode. Provided as a method (mirroring the other setting
+    /// setters) so call sites read consistently; the live reassignment happens in
+    /// `isRecordingModeEnabled`'s `didSet`.
+    func setRecordingModeEnabled(_ enabled: Bool) {
+        isRecordingModeEnabled = enabled
+    }
+
     /// Whether the user has completed onboarding at least once. Persisted
     /// to UserDefaults so the Start button only appears on first launch.
     var hasCompletedOnboarding: Bool {

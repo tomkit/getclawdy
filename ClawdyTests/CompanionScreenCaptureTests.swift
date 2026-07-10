@@ -201,76 +201,85 @@ struct CompanionScreenCaptureTests {
         #expect(isOwn == false)
     }
 
-    // MARK: - shouldExcludeOwnAppWindowFromCapture (results-window exemption)
+    // MARK: - shouldReincludeOwnAppWindowInCapture (results-window re-inclusion)
+    //
+    // The filter now excludes Clawdy's whole application, then RE-INCLUDES the
+    // registered results window(s) via `exceptingWindows`. This predicate computes
+    // that `exceptingWindows` set: it returns true ONLY for an own-app window whose
+    // number is registered as capturable, and false for everything else (our own
+    // chrome stays excluded by the app-level exclusion; other apps are already
+    // captured and need no exception).
 
     private let ownBundle = "com.getclawdy.app"
 
-    @Test func ownChromeWindowIsExcludedWhenNotInCapturableSet() {
+    @Test func ownChromeWindowIsNotReincludedWhenNotInCapturableSet() {
         // The transient chrome (overlays, pills, panels) must never leak: an
-        // own-app window whose number is NOT exempted is excluded from capture.
-        let shouldExclude = CompanionScreenCaptureUtility.shouldExcludeOwnAppWindowFromCapture(
+        // own-app window whose number is NOT registered stays excluded (the
+        // app-level exclusion removes it) — it is never re-included.
+        let shouldReinclude = CompanionScreenCaptureUtility.shouldReincludeOwnAppWindowInCapture(
             windowOwningBundleIdentifier: ownBundle,
             windowNumber: 42,
             ownAppBundleIdentifier: ownBundle,
             capturableOwnWindowNumbers: []
         )
-        #expect(shouldExclude == true)
+        #expect(shouldReinclude == false)
     }
 
-    @Test func resultsWindowIsExemptedFromOwnAppExclusion() {
-        // The research results window registers its number as capturable, so it
-        // stays IN the screenshot even though it belongs to our own app.
-        let shouldExclude = CompanionScreenCaptureUtility.shouldExcludeOwnAppWindowFromCapture(
+    @Test func resultsWindowIsReincludedDespiteAppExclusion() {
+        // The research results window registers its number as capturable, so it is
+        // re-included and stays IN the screenshot even though the whole Clawdy app
+        // is excluded.
+        let shouldReinclude = CompanionScreenCaptureUtility.shouldReincludeOwnAppWindowInCapture(
             windowOwningBundleIdentifier: ownBundle,
             windowNumber: 42,
             ownAppBundleIdentifier: ownBundle,
             capturableOwnWindowNumbers: [42]
         )
-        #expect(shouldExclude == false)
+        #expect(shouldReinclude == true)
     }
 
-    @Test func otherAppWindowIsNeverExcludedRegardlessOfCapturableSet() {
-        // Another app's window is the user's content — never excluded, and an
-        // unrelated capturable entry must not change that.
-        let shouldExclude = CompanionScreenCaptureUtility.shouldExcludeOwnAppWindowFromCapture(
+    @Test func otherAppWindowIsNeverReincludedRegardlessOfCapturableSet() {
+        // Another app's window is the user's content — it's captured by default and
+        // is never part of our own re-inclusion set, even if a number matches.
+        let shouldReinclude = CompanionScreenCaptureUtility.shouldReincludeOwnAppWindowInCapture(
             windowOwningBundleIdentifier: "com.apple.Safari",
             windowNumber: 42,
             ownAppBundleIdentifier: ownBundle,
             capturableOwnWindowNumbers: [42]
         )
-        #expect(shouldExclude == false)
+        #expect(shouldReinclude == false)
     }
 
-    @Test func onlyTheRegisteredResultsWindowIsExemptedAmongOwnWindows() {
+    @Test func onlyTheRegisteredResultsWindowIsReincludedAmongOwnWindows() {
         // With the results window (7) registered, a sibling own-app chrome window
-        // (8) is still excluded — the exemption is per-window, not app-wide.
+        // (8) is NOT re-included — the exemption is per-window, not app-wide.
         let capturable: Set<CGWindowID> = [7]
-        let resultsExcluded = CompanionScreenCaptureUtility.shouldExcludeOwnAppWindowFromCapture(
+        let resultsReincluded = CompanionScreenCaptureUtility.shouldReincludeOwnAppWindowInCapture(
             windowOwningBundleIdentifier: ownBundle,
             windowNumber: 7,
             ownAppBundleIdentifier: ownBundle,
             capturableOwnWindowNumbers: capturable
         )
-        let chromeExcluded = CompanionScreenCaptureUtility.shouldExcludeOwnAppWindowFromCapture(
+        let chromeReincluded = CompanionScreenCaptureUtility.shouldReincludeOwnAppWindowInCapture(
             windowOwningBundleIdentifier: ownBundle,
             windowNumber: 8,
             ownAppBundleIdentifier: ownBundle,
             capturableOwnWindowNumbers: capturable
         )
-        #expect(resultsExcluded == false)
-        #expect(chromeExcluded == true)
+        #expect(resultsReincluded == true)
+        #expect(chromeReincluded == false)
     }
 
-    @Test func nothingIsExcludedWhenOwnBundleUnknownEvenIfCapturableSet() {
+    @Test func nothingIsReincludedWhenOwnBundleUnknownEvenIfCapturableSet() {
         // If we can't determine our own bundle id we can't classify a window as
-        // ours, so we never exclude it (mirrors windowBelongsToOwnApp).
-        let shouldExclude = CompanionScreenCaptureUtility.shouldExcludeOwnAppWindowFromCapture(
+        // ours, so we never re-include it (mirrors windowBelongsToOwnApp).
+        let shouldReinclude = CompanionScreenCaptureUtility.shouldReincludeOwnAppWindowInCapture(
             windowOwningBundleIdentifier: ownBundle,
             windowNumber: 42,
             ownAppBundleIdentifier: nil,
             capturableOwnWindowNumbers: []
         )
-        #expect(shouldExclude == false)
+        #expect(shouldReinclude == false)
     }
 
     // MARK: - capturable-set thread safety

@@ -134,12 +134,29 @@ enum CompanionScreenCaptureUtility {
         // only the user's content — EXCEPT the research results window, which the
         // user explicitly opened and wants Clawdy to see. That window is exempted
         // via `capturableOwnWindowNumbers` so it stays in the screenshot.
+        //
+        // We exclude at the APPLICATION level, not the window level. Window-level
+        // exclusion (`excludingWindows:`) can only remove windows present in the
+        // CACHED shareable-content enumeration; a `.readOnly` overlay shown AFTER
+        // that enumeration (e.g. when Recording Mode is on) would not be in the
+        // cached window list and would LEAK into the model screenshot. Excluding
+        // the whole Clawdy application removes EVERY Clawdy window regardless of
+        // enumeration staleness, then `exceptingWindows` re-includes only the
+        // results window(s) the user opened.
         let ownBundleIdentifier = Bundle.main.bundleIdentifier
         // Read ONE atomic snapshot of the capturable set for the whole capture, so a
         // concurrent register/unregister on the main actor can't tear this read.
         let capturableWindowsForThisCapture = capturableWindowsSnapshot()
-        let ownAppWindows = content.windows.filter { window in
-            shouldExcludeOwnAppWindowFromCapture(
+        let clawdyApplication = content.applications.first { application in
+            windowBelongsToOwnApp(
+                windowOwningBundleIdentifier: application.bundleIdentifier,
+                ownAppBundleIdentifier: ownBundleIdentifier
+            )
+        }
+        // The own-app window(s) to RE-INCLUDE despite the app-level exclusion — the
+        // research results window(s) registered as capturable.
+        let capturableOwnWindows = content.windows.filter { window in
+            shouldReincludeOwnAppWindowInCapture(
                 windowOwningBundleIdentifier: window.owningApplication?.bundleIdentifier,
                 windowNumber: window.windowID,
                 ownAppBundleIdentifier: ownBundleIdentifier,
@@ -184,7 +201,23 @@ enum CompanionScreenCaptureUtility {
                           width: CGFloat(display.width), height: CGFloat(display.height))
             let isCursorScreen = displayFrame.contains(mouseLocation)
 
-            let filter = SCContentFilter(display: display, excludingWindows: ownAppWindows)
+            // Application-level exclusion of ALL Clawdy windows, re-including only
+            // the user-opened results window(s). If our own application isn't in
+            // the enumeration there is nothing of ours to leak, so exclude nothing.
+            let filter: SCContentFilter
+            if let clawdyApplication {
+                filter = SCContentFilter(
+                    display: display,
+                    excludingApplications: [clawdyApplication],
+                    exceptingWindows: capturableOwnWindows
+                )
+            } else {
+                filter = SCContentFilter(
+                    display: display,
+                    excludingApplications: [],
+                    exceptingWindows: []
+                )
+            }
 
             let configuration = SCStreamConfiguration()
             let targetDimensions = screenshotPixelDimensions(
@@ -299,13 +332,15 @@ enum CompanionScreenCaptureUtility {
         return windowOwningBundleIdentifier == ownAppBundleIdentifier
     }
 
-    /// Whether a window enumerated by ScreenCaptureKit should be EXCLUDED from the
-    /// screenshot sent to the model. We exclude the app's own transient chrome
-    /// (overlays, pills, panels) so it never leaks into the image, but keep a
-    /// window whose number is listed in `capturableOwnWindowNumbers` — the research
-    /// results window the user opened and explicitly wants Clawdy to look at.
-    /// Windows belonging to OTHER apps are never excluded here.
-    nonisolated static func shouldExcludeOwnAppWindowFromCapture(
+    /// Whether a window enumerated by ScreenCaptureKit should be RE-INCLUDED in the
+    /// model screenshot even though the whole Clawdy application is excluded at the
+    /// application level. Only a window that (a) belongs to our own app AND (b) has
+    /// its number listed in `capturableOwnWindowNumbers` qualifies — the research
+    /// results window the user opened and explicitly wants Clawdy to look at. Our
+    /// transient chrome (overlays, pills, panels) stays excluded via the app-level
+    /// exclusion, and windows belonging to OTHER apps are already captured, so both
+    /// return false (they need no exception).
+    nonisolated static func shouldReincludeOwnAppWindowInCapture(
         windowOwningBundleIdentifier: String?,
         windowNumber: CGWindowID,
         ownAppBundleIdentifier: String?,
@@ -317,8 +352,8 @@ enum CompanionScreenCaptureUtility {
         ) else {
             return false
         }
-        // Our own window — exclude it unless it's the exempted results window.
-        return !capturableOwnWindowNumbers.contains(windowNumber)
+        // Our own window — re-include it only if it's the exempted results window.
+        return capturableOwnWindowNumbers.contains(windowNumber)
     }
 
     /// Decides whether the cached SCShareableContent snapshot must be discarded

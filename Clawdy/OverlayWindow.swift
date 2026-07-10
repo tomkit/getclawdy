@@ -79,11 +79,17 @@ class OverlayWindow: NSWindow {
         self.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         self.isReleasedWhenClosed = false
         self.hasShadow = false
-        // Never capture our own full-screen cursor/response overlay into the
-        // screenshots we send to the model. .none keeps this window out of
-        // ScreenCaptureKit captures even when it is created after the first
-        // (now-cached) shareable-content enumeration.
-        self.sharingType = .none
+        // Whether this cursor/annotation/thinking-cue overlay is visible to
+        // EXTERNAL screen recorders is governed by the "Show Clawdy in screen
+        // recordings" (Recording Mode) setting — `.readOnly` when on, `.none` when
+        // off (the default). Either way it NEVER leaks into Clawdy's OWN model
+        // screenshots: those exclude all Clawdy windows at the application level
+        // (`CompanionScreenCaptureUtility`), independent of this `sharingType`.
+        // New windows read the setting here at construction; a live toggle
+        // reassigns it via `OverlayWindowManager.applyRecordingModeSharingType`.
+        self.sharingType = RecordingMode.overlaySharingType(
+            recordingEnabled: UserDefaults.standard.bool(forKey: .recordingModeEnabled)
+        )
 
         // Important: Allow the window to appear even when app is not active
         self.hidesOnDeactivate = false
@@ -1096,6 +1102,20 @@ private struct BlueCursorThinkingCueView: View {
 class OverlayWindowManager {
     private var overlayWindows: [OverlayWindow] = []
     var hasShownOverlayBefore = false
+
+    /// Reassigns `sharingType` on the currently-live overlay windows when the
+    /// "Show Clawdy in screen recordings" (Recording Mode) setting changes, so the
+    /// cursor / annotation / thinking-cue overlay becomes visible-to-recorders (or
+    /// hidden again) WITHOUT a relaunch. `sharingType` is mutable on a live
+    /// NSWindow, so this fully reverts when toggled back off. New overlay windows
+    /// read the setting at construction, so this only touches ones already on
+    /// screen.
+    func applyRecordingModeSharingType(recordingEnabled: Bool) {
+        let sharingType = RecordingMode.overlaySharingType(recordingEnabled: recordingEnabled)
+        for window in overlayWindows {
+            window.sharingType = sharingType
+        }
+    }
 
     // MARK: - Annotation mode
 
