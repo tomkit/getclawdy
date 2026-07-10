@@ -234,16 +234,23 @@ enum PointAudioSyncMapper {
         return nil
     }
 
-    /// Whether a spoken position is named within (or immediately after) the FIRST clip rather
-    /// than a later one.
+    /// Whether the point at `spokenPosition` is NAMED within the first clip rather than a
+    /// later one.
     ///
-    /// BLOCKER 2 (boundary): the model places a [POINT] tag right after the naming WORD, so a
-    /// tag following clip 0's last word/punctuation — which lands at clip 0's end or in the
-    /// separator whitespace before clip 1 — is still anchored to clip 0 and MUST map to clip
-    /// 0's alignment/playhead. We therefore treat positions at/before `firstClipEndOffset`
-    /// (inclusive) as clip 0, not clip 1.
-    static func belongsToFirstClip(spokenPosition: Int, firstClipEndOffset: Int) -> Bool {
-        spokenPosition <= firstClipEndOffset
+    /// BLOCKER 2 (boundary): the model places a [POINT] tag right after the naming WORD, so we
+    /// route by where that WORD lives, not by the raw tag position. A tag following clip 0's
+    /// last word/punctuation — which lands at clip 0's end, in the separator whitespace, or
+    /// even at clip 1's first character — still NAMES a clip-0 word, so it must map to clip 0's
+    /// alignment/playhead. We take the start of the word immediately before the tag and treat
+    /// it as clip 0 when that word starts before `firstClipEndOffset` (clip 0's located end).
+    /// A word starting at/after clip 0's end is in the batched remainder (clip 1). Routing by
+    /// the word — not `spokenPosition` vs a boundary — is what makes the separator case correct
+    /// regardless of the exact separator width (the earlier `spokenPosition <= end` rule
+    /// mis-routed a tag one past clip 0's trimmed end).
+    static func belongsToFirstClip(spokenPosition: Int, firstClipEndOffset: Int, in spokenText: String) -> Bool {
+        let spokenCharacters = spokenText.map { String($0) }
+        let namedWordStartOffset = indexOfWordStartBefore(positionInClip: spokenPosition, characters: spokenCharacters)
+        return namedWordStartOffset < firstClipEndOffset
     }
 
     /// Whether a turn should drive TIMED pointing rather than the untimed fixed-dwell walk.
@@ -298,6 +305,33 @@ enum PointAudioSyncMapper {
         }
         let anchorTime = alignment.characterStartTimesSeconds[anchorCharacterIndex]
         return max(0, anchorTime - leadSeconds)
+    }
+
+    /// The clip-relative fire time for a point given its naming clip's LOCATED start offset and
+    /// alignment — or nil, meaning "degrade this point to the untimed fixed dwell".
+    ///
+    /// Returns nil when the clip couldn't be placed on the spoken-text ruler
+    /// (`clipStartOffset == nil`) or has no per-word timing (`alignment == nil` / empty). MINOR
+    /// (BLOCKER 2 follow-on): when clip 1's text can't be located (the speaker batches later
+    /// sentences with single spaces while the spoken text keeps the original whitespace), we
+    /// must NOT re-base from a guessed offset — an off-by-N offset would schedule against the
+    /// wrong word — so we degrade instead. This composes the re-base (TRAP 2) with the anchor/
+    /// lead/clamp of `fireTimeSeconds` above.
+    static func fireTimeSeconds(
+        spokenPosition: Int,
+        clipStartOffset: Int?,
+        alignment: SpeechClipAlignment?,
+        strategy: PointAudioAnchorStrategy,
+        leadSeconds: Double
+    ) -> Double? {
+        guard let clipStartOffset, let alignment else { return nil }
+        let positionInClip = positionInClip(spokenPosition: spokenPosition, clipStartOffset: clipStartOffset)
+        return fireTimeSeconds(
+            alignment: alignment,
+            positionInClip: positionInClip,
+            strategy: strategy,
+            leadSeconds: leadSeconds
+        )
     }
 
     /// The character index at which the WORD immediately before `positionInClip` begins.

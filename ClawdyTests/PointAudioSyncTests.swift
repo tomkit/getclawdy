@@ -156,8 +156,8 @@ struct PointAudioSyncTests {
     }
 
     /// BLOCKER 2: a POINT tag right after clip 0's final word/punctuation is anchored to
-    /// clip 0 and must map to clip 0's alignment/playhead — NOT clip 1's. The old
-    /// `spokenPosition == firstClipTextLength -> clip 1` rule mis-routed exactly this case.
+    /// clip 0 and must map to clip 0's alignment/playhead — NOT clip 1's. Routing keys off the
+    /// NAMED word, so the boundary tag reads clip 0's timeline.
     @Test func aPointAtTheEndOfClipZeroMapsToClipZeroNotClipOne() throws {
         // Spoken text is two clips. A [POINT] tag sat right after clip 0's last word, so its
         // spoken position lands at clip 0's end (or in the separator before clip 1).
@@ -170,9 +170,9 @@ struct PointAudioSyncTests {
         let clipOneStart = try #require(PointAudioSyncMapper.clipStartOffset(of: clipOneText, in: spokenText, from: clipZeroEnd)) // 19
 
         // A tag right after clip 0's last word "panel" sits at position 18 (its end / the
-        // separator space). It must be treated as clip 0.
+        // separator space). Its named word ("panel") is in clip 0, so it maps to clip 0.
         let boundaryPosition = clipZeroEnd
-        #expect(PointAudioSyncMapper.belongsToFirstClip(spokenPosition: boundaryPosition, firstClipEndOffset: clipZeroEnd) == true)
+        #expect(PointAudioSyncMapper.belongsToFirstClip(spokenPosition: boundaryPosition, firstClipEndOffset: clipZeroEnd, in: spokenText) == true)
         // Re-based into clip 0's coordinate it is position 18 (clamped by the anchor to the
         // last word), NOT some position inside clip 1.
         let clipZeroPosition = PointAudioSyncMapper.positionInClip(spokenPosition: boundaryPosition, clipStartOffset: clipZeroStart)
@@ -187,8 +187,72 @@ struct PointAudioSyncTests {
 
         // A position genuinely inside clip 1 belongs to clip 1 and re-bases to its own zero.
         let clipOnePosition = PointAudioSyncMapper.positionInClip(spokenPosition: clipOneStart + 5, clipStartOffset: clipOneStart)
-        #expect(PointAudioSyncMapper.belongsToFirstClip(spokenPosition: clipOneStart + 5, firstClipEndOffset: clipZeroEnd) == false)
+        #expect(PointAudioSyncMapper.belongsToFirstClip(spokenPosition: clipOneStart + 5, firstClipEndOffset: clipZeroEnd, in: spokenText) == false)
         #expect(clipOnePosition == 5)
+    }
+
+    /// BLOCKER 2 (residual): a POINT anchored in the SEPARATOR WHITESPACE after clip 0's last
+    /// word — including a tag one PAST clip 0's trimmed end (or at clip 1's first character) —
+    /// maps to clip 0 and schedules against clip 0's alignment/playhead. The earlier
+    /// `spokenPosition <= clipZeroEnd` rule mis-routed exactly `clipZeroEnd + 1` to clip 1.
+    @Test func aPointInTheSeparatorWhitespaceMapsToClipZeroNotClipOne() throws {
+        // "Click panel. Then go." — clip 0 "Click panel." ends at 12; clip 1 "Then go."
+        // starts at 13 (single-space separator at index 12).
+        let spokenText = "Click panel. Then go."
+        let clipZeroText = "Click panel."
+        let clipOneText = "Then go."
+        let clipZeroStart = try #require(PointAudioSyncMapper.clipStartOffset(of: clipZeroText, in: spokenText, from: 0))
+        let clipZeroEnd = clipZeroStart + clipZeroText.count // 12
+        let clipOneStart = try #require(PointAudioSyncMapper.clipStartOffset(of: clipOneText, in: spokenText, from: clipZeroEnd)) // 13
+        #expect(clipZeroEnd == 12)
+        #expect(clipOneStart == 13)
+
+        // The reviewer's exact case: a tag at clipZeroEnd + 1 (== clipOneStart for a single
+        // -space separator). Its named word is still "panel" (clip 0), so it maps to clip 0 —
+        // the OLD `spokenPosition <= clipZeroEnd` rule wrongly sent this to clip 1.
+        let separatorPosition = clipZeroEnd + 1
+        #expect(PointAudioSyncMapper.belongsToFirstClip(spokenPosition: separatorPosition, firstClipEndOffset: clipZeroEnd, in: spokenText) == true)
+
+        // It schedules against CLIP 0's alignment — the fire time resolves to "panel" (clip 0
+        // local index 6 → 0.6s with our synthetic alignment), NOT anything in clip 1.
+        let clipZeroAlignment = alignment(for: clipZeroText)
+        let fireTime = try #require(PointAudioSyncMapper.fireTimeSeconds(
+            spokenPosition: separatorPosition,
+            clipStartOffset: clipZeroStart,
+            alignment: clipZeroAlignment,
+            strategy: .startOfWordBeforeTag,
+            leadSeconds: 0.0
+        ))
+        #expect(abs(fireTime - 0.6) < 0.0001)
+    }
+
+    /// MINOR (BLOCKER 2 follow-on): when clip 1's text can't be located on the spoken-text
+    /// ruler (a whitespace-normalization mismatch — the speaker batches later sentences with
+    /// single spaces while the spoken text keeps the original whitespace), the point DEGRADES
+    /// to the untimed dwell (nil fire time) rather than re-basing from a guessed offset.
+    @Test func aClipThatCannotBeLocatedDegradesToUntimedRatherThanMisScheduling() {
+        let clipOneAlignment = alignment(for: "open the run panel")
+        // clipStartOffset is nil (clip couldn't be located) → the composed fire time is nil,
+        // which the scheduler reads as "degrade this target to the untimed fixed dwell".
+        let degraded = PointAudioSyncMapper.fireTimeSeconds(
+            spokenPosition: 42,
+            clipStartOffset: nil,
+            alignment: clipOneAlignment,
+            strategy: .startOfWordBeforeTag,
+            leadSeconds: 0.0
+        )
+        #expect(degraded == nil)
+
+        // With a valid located offset, the same point DOES schedule (non-nil) — proving nil
+        // means "unlocatable", not "always degrade".
+        let scheduled = PointAudioSyncMapper.fireTimeSeconds(
+            spokenPosition: 42,
+            clipStartOffset: 30,
+            alignment: clipOneAlignment,
+            strategy: .startOfWordBeforeTag,
+            leadSeconds: 0.0
+        )
+        #expect(scheduled != nil)
     }
 
     /// TRAP 2: a clip-1 point resolves against clip 1's OWN zero. Re-basing by the located

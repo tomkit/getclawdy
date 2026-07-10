@@ -2154,11 +2154,15 @@ final class CompanionManager: ObservableObject {
                 if Task.isCancelled { return }
 
                 let spokenPosition = spokenPositionsByTargetIndex[targetIndex]
-                // BLOCKER 2: a position at/before clip 0's end (incl. the separator) is named
-                // in clip 0 and must use clip 0's alignment/playhead — never clip 1's.
+                // BLOCKER 2 (residual): route by the NAMED word (the word before the tag), so a
+                // tag in the separator whitespace after clip 0's last word — or at clip 1's
+                // first character — still uses clip 0's alignment/playhead, never clip 1's.
+                // (The streaming speaker emits at most two clips: clip 0 = first sentence,
+                // clip 1 = batched remainder — so "not clip 0" is clip 1.)
                 let namingClipOrdinal = PointAudioSyncMapper.belongsToFirstClip(
                     spokenPosition: spokenPosition,
-                    firstClipEndOffset: clipZeroEndOffset
+                    firstClipEndOffset: clipZeroEndOffset,
+                    in: spokenText
                 ) ? 0 : 1
 
                 // Wait (bounded) for this point's clip to be reported — clip 1 (the batched
@@ -2169,25 +2173,24 @@ final class CompanionManager: ObservableObject {
                 let clipReport = await self.awaitClipReport(ordinal: namingClipOrdinal, maxWaitPolls: Self.audioSyncClipReportMaxPolls)
                 if Task.isCancelled { return }
 
-                // Re-base the position into the naming clip's OWN text coordinate (TRAP 2).
-                let clipStartOffset: Int
+                // Locate the naming clip on the SAME spoken-text ruler so we re-base into its
+                // own coordinate (TRAP 2). MINOR: if clip 1's text can't be located (whitespace
+                // normalization mismatch), `clipStartOffset` stays nil and the fire time below
+                // is nil → we DEGRADE this target rather than schedule from a guessed offset.
+                let namingClipStartOffset: Int?
                 if namingClipOrdinal == 0 {
-                    clipStartOffset = clipZeroStartOffset
+                    namingClipStartOffset = clipZeroStartOffset
                 } else if let clipOneText = clipReport?.clipText {
-                    clipStartOffset = PointAudioSyncMapper.clipStartOffset(of: clipOneText, in: spokenText, from: clipZeroEndOffset) ?? clipZeroEndOffset
+                    namingClipStartOffset = PointAudioSyncMapper.clipStartOffset(of: clipOneText, in: spokenText, from: clipZeroEndOffset)
                 } else {
-                    clipStartOffset = clipZeroEndOffset
+                    namingClipStartOffset = nil
                 }
-                let positionInClip = PointAudioSyncMapper.positionInClip(
-                    spokenPosition: spokenPosition,
-                    clipStartOffset: clipStartOffset
-                )
 
                 if let clipReport,
-                   let alignment = clipReport.timing.alignment,
                    let fireTimeSeconds = PointAudioSyncMapper.fireTimeSeconds(
-                       alignment: alignment,
-                       positionInClip: positionInClip,
+                       spokenPosition: spokenPosition,
+                       clipStartOffset: namingClipStartOffset,
+                       alignment: clipReport.timing.alignment,
                        strategy: PointAudioSyncTuning.anchorStrategy,
                        leadSeconds: PointAudioSyncTuning.leadSeconds
                    ) {
@@ -2199,10 +2202,11 @@ final class CompanionManager: ObservableObject {
                         toReachSeconds: fireTimeSeconds
                     )
                 } else {
-                    // BLOCKER 3: this clip has NO per-word timing (Apple fallback / empty
-                    // alignment / no report). Degrade PROMPTLY to the untimed multi-point
-                    // walk — a fixed dwell for this target — instead of hanging on a missing
-                    // report or jumping instantly through the remaining targets.
+                    // BLOCKER 3 / MINOR: no per-word timing for this clip (Apple fallback /
+                    // empty alignment / no report) OR the clip couldn't be located on the
+                    // spoken-text ruler. Degrade PROMPTLY to the untimed multi-point walk — a
+                    // fixed dwell for this target — instead of hanging or scheduling from a
+                    // wrong offset.
                     await self.sleepUntimedPointingDwell()
                 }
 
