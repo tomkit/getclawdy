@@ -10,6 +10,57 @@
 import AppKit
 import SwiftUI
 
+/// The single, central place to tune how many places the blue cursor points at in
+/// one reply and how long it lingers on each. Grouped so the feel can be adjusted
+/// during live testing without hunting through the prompt and the overlay.
+///
+/// - `maxPointsSoftCap` is interpolated into the coaching system prompt (the model
+///   is asked to emit an ORDERED point for EACH distinct named place, up to this
+///   many). There is NO hard cap in the parser or overlay — every emitted tag is
+///   walked — so this soft cap is the only limit, kept sane so a reply doesn't turn
+///   into an endless walk.
+/// - The dwell scales DOWN as the sequence grows (`perPointDwellSeconds(forPointingTargetCount:)`)
+///   so an 8-point UNTIMED walk (Apple TTS / degraded audio-sync) doesn't feel
+///   endless. The audio-synced walk (ElevenLabs) is driven by the spoken clock, not
+///   this dwell, except for the final target's fly-back.
+enum PointingTuning {
+    /// Soft cap on how many distinct places we ask the model to point at in one
+    /// reply. Raised from the former ~3–4 so more of the named landmarks get a
+    /// pointer. Pure guidance for the model; nothing enforces it in code.
+    static let maxPointsSoftCap = 7
+
+    /// Per-point dwell for the UNTIMED walk when the sequence is small (at or below
+    /// `dwellScalingStartsAbovePointCount`). The former single value.
+    static let basePerPointDwellSeconds: Double = 1.3
+
+    /// The shortest per-point dwell we scale down to for the largest sequences, so a
+    /// long untimed walk stays snappy instead of ballooning to ~15+ seconds.
+    static let minPerPointDwellSeconds: Double = 0.7
+
+    /// Sequences with this many targets or fewer keep the full `basePerPointDwellSeconds`.
+    /// Above it, the dwell interpolates down toward `minPerPointDwellSeconds`, reaching
+    /// the minimum at `maxPointsSoftCap`.
+    static let dwellScalingStartsAbovePointCount = 3
+
+    /// How long the pointing bubble fades before the buddy moves on to the next target.
+    static let pointingBubbleFadeSeconds: Double = 0.4
+
+    /// The per-point dwell for a sequence of `targetCount` targets on the UNTIMED walk.
+    /// Full dwell for small sequences; linearly scaled down to `minPerPointDwellSeconds`
+    /// as the count grows to `maxPointsSoftCap`, so more points doesn't mean a longer wait.
+    /// Pure so it's unit-testable.
+    static func perPointDwellSeconds(forPointingTargetCount targetCount: Int) -> Double {
+        guard targetCount > dwellScalingStartsAbovePointCount else {
+            return basePerPointDwellSeconds
+        }
+        let pointsOverThreshold = targetCount - dwellScalingStartsAbovePointCount
+        let scalingRange = max(1, maxPointsSoftCap - dwellScalingStartsAbovePointCount)
+        let scaledFraction = min(1.0, Double(pointsOverThreshold) / Double(scalingRange))
+        let dwellReduction = (basePerPointDwellSeconds - minPerPointDwellSeconds) * scaledFraction
+        return basePerPointDwellSeconds - dwellReduction
+    }
+}
+
 class OverlayWindow: NSWindow {
     init(screen: NSScreen) {
         // Create window covering entire screen
@@ -198,17 +249,10 @@ struct BlueCursorView: View {
     /// sequence replacing this one) can CANCEL it cleanly — no overlapping timers.
     @State private var pointingDwellWorkItem: DispatchWorkItem?
 
-    /// How long the buddy dwells pointing at EACH target before advancing to the
-    /// next. Kept short (vs the former single-point 3.0s hold) so a 3–4 point
-    /// sequence doesn't take ~15 seconds. The bubble then fades over
-    /// `pointingBubbleFadeSeconds` before the buddy moves on.
-    ///
-    /// FORWARD-COMPAT: this dwell is only the DEFAULT trigger for advancing. The
-    /// upcoming audio-sync stage will instead advance at each element's spoken word
-    /// time (minus a lead offset); the advance step (`advanceOrReturnAfterPointing`)
-    /// is deliberately separated from this timer so that swap needs no restructure.
-    private static let perPointDwellSeconds: Double = 1.3
-    private static let pointingBubbleFadeSeconds: Double = 0.4
+    /// How long the bubble fades before the buddy moves on. Lives in `PointingTuning`
+    /// (the single place all the pointing feel-tunables are grouped); mirrored here so
+    /// the existing call sites read the same as before.
+    private static let pointingBubbleFadeSeconds: Double = PointingTuning.pointingBubbleFadeSeconds
 
     /// Scale factor applied to the buddy triangle during flight. Grows to ~1.3x
     /// at the midpoint of the arc and shrinks back to 1.0x on landing, creating
@@ -228,15 +272,6 @@ struct BlueCursorView: View {
     private let thinkingCueBubbleWidth: CGFloat = 90
 
     private let fullWelcomeMessage = "hey! i'm clawdy"
-
-    private let navigationPointerPhrases = [
-        "right here!",
-        "this one!",
-        "over here!",
-        "click this!",
-        "here it is!",
-        "found it!"
-    ]
 
     var body: some View {
         ZStack {
@@ -721,13 +756,34 @@ struct BlueCursorView: View {
         navigationBubbleSize = .zero
         navigationBubbleScale = 0.5
 
-        // Use custom bubble text from the companion manager (e.g. onboarding demo)
-        // if available, otherwise fall back to a random pointer phrase
-        let pointerPhrase = companionManager.detectedElementBubbleText
-            ?? navigationPointerPhrases.randomElement()
-            ?? "right here!"
+        // The bubble now shows the NAME of the place/landmark being pointed at (the
+        // POINT tag's `label`), so it's clear what the cursor is referencing — instead
+        // of a generic "found it!"-style phrase. The onboarding demo still overrides
+        // with its own custom text via `detectedElementBubbleText`. If there's no name
+        // to show (an empty/absent label), we degrade gracefully: no bubble at all,
+        // never a placeholder.
+        let onboardingCustomText = companionManager.detectedElementBubbleText
+        let currentTargetLabel = companionManager.currentPointingTarget?.elementLabel?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        streamNavigationBubbleCharacter(phrase: pointerPhrase, characterIndex: 0) {
+        let pointerLabel: String? = {
+            if let onboardingCustomText, !onboardingCustomText.isEmpty {
+                return onboardingCustomText
+            }
+            if let currentTargetLabel, !currentTargetLabel.isEmpty {
+                return currentTargetLabel
+            }
+            return nil
+        }()
+
+        guard let pointerLabel else {
+            // No place name to show — leave the bubble empty (the body gates on
+            // non-empty text) and just dwell, then advance.
+            schedulePointingDwellThenAdvance()
+            return
+        }
+
+        streamNavigationBubbleCharacter(phrase: pointerLabel, characterIndex: 0) {
             // All characters streamed — dwell on this target, then advance to the
             // next one (or fly back if it was the last).
             self.schedulePointingDwellThenAdvance()
@@ -775,8 +831,11 @@ struct BlueCursorView: View {
             )
         }
         pointingDwellWorkItem = dwellWork
+        // Scale the dwell DOWN as the sequence grows so a large untimed walk (Apple TTS
+        // or degraded audio-sync) stays snappy instead of ballooning.
+        let perPointDwellSeconds = PointingTuning.perPointDwellSeconds(forPointingTargetCount: targetCount)
         DispatchQueue.main.asyncAfter(
-            deadline: .now() + Self.perPointDwellSeconds,
+            deadline: .now() + perPointDwellSeconds,
             execute: dwellWork
         )
     }

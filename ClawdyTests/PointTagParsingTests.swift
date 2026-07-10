@@ -274,4 +274,38 @@ struct PointTagParsingTests {
         #expect(manager.currentPointingTargetIndex == nil)
         #expect(manager.detectedElementTargets.isEmpty)
     }
+
+    // MARK: - PointingTuning dwell scaling
+
+    /// Small sequences keep the full base dwell — nothing changes for a 1–3 point walk.
+    @Test func smallSequencesKeepBaseDwell() {
+        for targetCount in 1...PointingTuning.dwellScalingStartsAbovePointCount {
+            #expect(
+                PointingTuning.perPointDwellSeconds(forPointingTargetCount: targetCount)
+                    == PointingTuning.basePerPointDwellSeconds
+            )
+        }
+    }
+
+    /// The dwell scales DOWN monotonically as the sequence grows past the threshold,
+    /// so a large untimed walk doesn't balloon.
+    @Test func largerSequencesScaleDwellDown() {
+        let fourPointDwell = PointingTuning.perPointDwellSeconds(forPointingTargetCount: 4)
+        let sixPointDwell = PointingTuning.perPointDwellSeconds(forPointingTargetCount: 6)
+        #expect(fourPointDwell < PointingTuning.basePerPointDwellSeconds)
+        #expect(sixPointDwell < fourPointDwell)
+    }
+
+    /// At the soft cap the dwell reaches the configured minimum, and never goes below
+    /// it even if the model disobeys and emits more points than the cap.
+    @Test func dwellBottomsOutAtTheMinimum() {
+        #expect(
+            PointingTuning.perPointDwellSeconds(forPointingTargetCount: PointingTuning.maxPointsSoftCap)
+                == PointingTuning.minPerPointDwellSeconds
+        )
+        #expect(
+            PointingTuning.perPointDwellSeconds(forPointingTargetCount: PointingTuning.maxPointsSoftCap + 5)
+                == PointingTuning.minPerPointDwellSeconds
+        )
+    }
 }
