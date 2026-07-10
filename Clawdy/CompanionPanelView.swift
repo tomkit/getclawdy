@@ -346,10 +346,21 @@ struct CompanionPanelView: View {
         if !companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
             if !companionManager.hasSubmittedEmail {
                 VStack(spacing: 8) {
-                    TextField("Enter your email", text: $emailInput)
+                    TextField("", text: $emailInput)
                         .textFieldStyle(.plain)
                         .font(DS.Font.detailBodyRegular)
                         .foregroundColor(DS.Colors.textPrimary)
+                        // Draw the placeholder ourselves: the native macOS placeholder renders in a
+                        // system dark tone that is invisible on this dark surface, so overlay it in a
+                        // muted-but-legible secondary token when the field is empty.
+                        .overlay(alignment: .leading) {
+                            if emailInput.isEmpty {
+                                Text("Enter your email")
+                                    .font(DS.Font.detailBodyRegular)
+                                    .foregroundColor(DS.Colors.textSecondary)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                         .padding(.horizontal, DS.Spacing.md)
                         .padding(.vertical, DS.Spacing.sm)
                         .background(
@@ -998,10 +1009,21 @@ struct CompanionPanelView: View {
 
             if elevenLabsVoicesFetchFailed || fetchedElevenLabsVoices.isEmpty {
                 HStack(spacing: 6) {
-                    TextField("Voice ID", text: $manualVoiceIDInput)
+                    TextField("", text: $manualVoiceIDInput)
                         .textFieldStyle(.plain)
                         .font(DS.Font.overlayCaptionRegular)
                         .foregroundColor(DS.Colors.textPrimary)
+                        // Draw the placeholder ourselves: the native macOS placeholder renders in a
+                        // system dark tone that is invisible on this dark surface, so overlay it in a
+                        // muted-but-legible secondary token when the field is empty.
+                        .overlay(alignment: .leading) {
+                            if manualVoiceIDInput.isEmpty {
+                                Text("Voice ID")
+                                    .font(DS.Font.overlayCaptionRegular)
+                                    .foregroundColor(DS.Colors.textSecondary)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                         .padding(.horizontal, DS.Spacing.sm)
                         .padding(.vertical, DS.Spacing.compact)
                         .background(

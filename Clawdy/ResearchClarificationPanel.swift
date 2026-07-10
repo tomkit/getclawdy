@@ -149,11 +149,22 @@ private struct ResearchClarificationView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            TextField("type your answer…", text: $viewModel.answerText, axis: .vertical)
+            TextField("", text: $viewModel.answerText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(DS.Font.detailBodyRegular)
                 .foregroundColor(DS.Colors.textPrimary)
                 .lineLimit(1...4)
+                // Draw the placeholder ourselves: the native macOS placeholder renders in a
+                // system dark tone that is invisible on this dark surface, so overlay it in a
+                // muted-but-legible secondary token when the field is empty.
+                .overlay(alignment: .topLeading) {
+                    if viewModel.answerText.isEmpty {
+                        Text("type your answer…")
+                            .font(DS.Font.detailBodyRegular)
+                            .foregroundColor(DS.Colors.textSecondary)
+                            .allowsHitTesting(false)
+                    }
+                }
                 .padding(DS.Spacing.sm)
                 .background(
                     // Shared input-field radius (DS.CornerRadius.medium, 8) — the same token

@@ -44,11 +44,22 @@ struct ResearchFollowUpComposer: View {
 
     var body: some View {
         HStack(spacing: DS.Spacing.sm) {
-            TextField(placeholder, text: $draftText, axis: .vertical)
+            TextField("", text: $draftText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(DS.Font.detailBodyRegular)
                 .foregroundColor(DS.Colors.textPrimary)
                 .lineLimit(1...4)
+                // Draw the placeholder ourselves: the native macOS placeholder renders in a
+                // system dark tone that is invisible on this dark surface, so overlay it in a
+                // muted-but-legible secondary token when the field is empty.
+                .overlay(alignment: .topLeading) {
+                    if draftText.isEmpty {
+                        Text(placeholder)
+                            .font(DS.Font.detailBodyRegular)
+                            .foregroundColor(DS.Colors.textSecondary)
+                            .allowsHitTesting(false)
+                    }
+                }
                 .padding(DS.Spacing.sm)
                 .background(
                     // Reconciled to the shared input-field radius (DS.CornerRadius.medium, 8)
