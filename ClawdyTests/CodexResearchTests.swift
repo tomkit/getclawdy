@@ -145,13 +145,27 @@ struct CodexResearchEngineCapabilityTests {
 ///     transcript under $HOME so the late transcript-path resolution can find it (MINOR 4);
 ///   - when NOT `emitThreadStarted`, omits the event (models a drift where the deliverable
 ///     is still produced but no follow-up handle is captured — MINOR 3).
-private func makeFakeCodexBinary(emitThreadStarted: Bool = true, writeRollout: Bool = true) throws -> String {
+private func makeFakeCodexBinary(
+    emitThreadStarted: Bool = true,
+    writeRollout: Bool = true,
+    embeddedImageURL: String? = nil
+) throws -> String {
     let threadStarted = #"{"type":"thread.started","thread_id":"codex-thread-1"}"#
     let turnStarted = #"{"type":"turn.started"}"#
     let webSearch = #"{"type":"item.completed","item":{"type":"web_search","query":"aomori photos"}}"#
     let fileChange = #"{"type":"file_change","kind":"add"}"#
     let agentMessage = #"{"type":"item.completed","item":{"type":"agent_message","text":"done, wrote the page"}}"#
     let turnCompleted = #"{"type":"turn.completed","usage":{}}"#
+
+    // The deliverable body the fake writes. When `embeddedImageURL` is set, the page
+    // carries a remote <img> so a test can exercise the engine's post-write image
+    // validation/rewrite pass; otherwise it's the plain image-free page.
+    let deliverableBody: String
+    if let embeddedImageURL {
+        deliverableBody = #"<!doctype html><html><body><h1>codex report</h1><img src="\#(embeddedImageURL)"></body></html>"#
+    } else {
+        deliverableBody = "<!doctype html><html><body><h1>codex report</h1></body></html>"
+    }
 
     let threadStartedLine = emitThreadStarted ? "emit '\(threadStarted)'" : "# thread.started omitted"
     let rolloutLine = (emitThreadStarted && writeRollout) ? """
@@ -178,7 +192,7 @@ private func makeFakeCodexBinary(emitThreadStarted: Bool = true, writeRollout: B
     emit '\(webSearch)'
     outpath=$(printf '%s' "$prompt" | grep -oE '/[^[:space:]]*report\\.html' | head -1)
     if [ -z "$outpath" ]; then outpath="$cdir/report.html"; fi
-    printf '<!doctype html><html><body><h1>codex report</h1></body></html>' > "$outpath"
+    printf '%s' '\(deliverableBody)' > "$outpath"
     emit '\(fileChange)'
     emit '\(agentMessage)'
     emit '\(turnCompleted)'
@@ -202,6 +216,25 @@ private func makeThreadStartedThenHangCodexBinary() throws -> String {
     sleep 30
     """
     return try ResearchTestSupport.makeFakeExecutable(scriptBody: scriptContents)
+}
+
+/// A fake `ImageURLValidating` for the Codex execute path's post-write validation test:
+/// answers from a fixed map (defaulting unknown URLs to `.invalid`) and records every URL
+/// it was asked about, so the test can assert the validator was actually consulted.
+private actor CodexFakeImageURLValidator: ImageURLValidating {
+    private let resultsByAbsoluteString: [String: ImageValidationResult]
+    private var validatedAbsoluteStrings: [String] = []
+
+    init(resultsByAbsoluteString: [String: ImageValidationResult]) {
+        self.resultsByAbsoluteString = resultsByAbsoluteString
+    }
+
+    func validate(imageURL: URL) async -> ImageValidationResult {
+        validatedAbsoluteStrings.append(imageURL.absoluteString)
+        return resultsByAbsoluteString[imageURL.absoluteString] ?? .invalid
+    }
+
+    func validatedURLStrings() -> [String] { validatedAbsoluteStrings }
 }
 
 /// A unique fake $HOME so the fake's `~/.codex/sessions/...` rollout write is isolated.
@@ -315,6 +348,52 @@ struct CodexResearchExecuteLifecycleTests {
         let resolvedTranscript = engine.transcriptPath(sessionID: "client-run-1", outputDirectory: outputDirectory)
         #expect(resolvedTranscript?.hasSuffix("rollout-2026-07-09T00-00-00-codex-thread-1.jsonl") == true,
                 "the codex transcript path must resolve to the rollout file once the thread_id is known")
+    }
+
+    /// Cross-review BLOCKING: the Codex execute prompt promises broken images are
+    /// "handled automatically after the page is written (they're swapped for a clean
+    /// placeholder)". That promise is only TRUE if the Codex execute path actually runs
+    /// the deterministic post-write `ResearchImageValidator` pass — the same one the
+    /// Claude engine runs. This proves it does: with an injected validator that marks the
+    /// embedded remote image INVALID, the produced report.html is rewritten so the broken
+    /// image is replaced by the inline "Image unavailable" placeholder and the bad URL is
+    /// gone. (Uses a fake validator + fake codex binary — no network.)
+    @Test func executePhaseRunsThePostWriteImageValidationOnItsDeliverable() async throws {
+        let brokenImageURL = "https://example.com/broken.jpg"
+        let codexBinary = try makeFakeCodexBinary(embeddedImageURL: brokenImageURL)
+        let fakeValidator = CodexFakeImageURLValidator(
+            resultsByAbsoluteString: [brokenImageURL: .invalid]
+        )
+        let engine = CodexResearchEngine(
+            binaryPath: codexBinary,
+            homeDirectoryPath: try makeFakeCodexHome(),
+            executePhaseTimeoutSeconds: 60,
+            makeImageValidator: { fakeValidator }
+        )
+        let outputDirectory = try makeCodexScratchOutputDirectory(engine: engine, runID: "client-run-img")
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+
+        _ = try await engine.runPlanPhase(
+            task: "gallery of things", sessionID: "client-run-img",
+            outputDirectory: outputDirectory, onProgress: { _ in }
+        )
+        let deliverableURL = try await engine.runExecutePhase(
+            sessionID: "client-run-img",
+            outputDirectory: outputDirectory,
+            clarificationAnswers: nil,
+            onProgress: { _ in }
+        )
+
+        // The validator was actually consulted about the embedded image.
+        let validated = await fakeValidator.validatedURLStrings()
+        #expect(validated.contains(brokenImageURL),
+                "the Codex execute path must run the post-write image validator on its deliverable")
+        // …and the broken image was rewritten to the inline placeholder on disk.
+        let rewrittenHTML = try String(contentsOf: deliverableURL, encoding: .utf8)
+        #expect(rewrittenHTML.contains("Image unavailable"),
+                "the broken remote image must be swapped for the inline placeholder")
+        #expect(!rewrittenHTML.contains(brokenImageURL),
+                "the broken image URL must no longer be embedded after the validation pass")
     }
 
     /// MINOR 3: when the execute turn produces a deliverable but NO thread_id (a

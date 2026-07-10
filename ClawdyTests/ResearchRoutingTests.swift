@@ -342,8 +342,10 @@ struct ResearchArgumentsTests {
         // Positive guidance: embed directly, broken images handled automatically.
         #expect(prompt.contains("do not webfetch"))
         #expect(prompt.contains("handled automatically"))
-        // WebFetch remains available for actual page/content research.
-        #expect(prompt.contains("webfetch"))
+        // WebFetch remains available for actual page/content research — assert the
+        // content-specific allowance directly (not just the substring "webfetch",
+        // which the negative "do not WebFetch" phrase already satisfies).
+        #expect(prompt.contains("reading actual page/article content"))
     }
 
     @Test func executeUserMessageDoesNotInstructImagePreFetching() {
@@ -355,8 +357,9 @@ struct ResearchArgumentsTests {
         #expect(!message.contains("confirmed are reachable"))
         #expect(message.contains("do not webfetch"))
         #expect(message.contains("handled automatically"))
-        // WebFetch still permitted for page content.
-        #expect(message.contains("webfetch"))
+        // WebFetch still permitted for page content — assert the content-specific
+        // allowance directly (not just the substring "webfetch").
+        #expect(message.contains("reading actual page/article content"))
     }
 
     // Background-delegation guard: the plan-phase `claude -p` runs the user's OWN

@@ -80,6 +80,14 @@ final class CodexResearchEngine: ResearchEngine {
     /// resume). Defaults to `.shared`, the same store the research session/manager use in
     /// production, so both write the SAME `manifest.json`; tests inject a temp store.
     private let manifestStore: ResearchManifestStore
+    /// Caps for the deterministic post-write image-validation pass (per-image
+    /// timeout + overall budget + concurrency). Injectable so tests can shrink them.
+    /// SAME pass the Claude engine runs — this is what makes the execute prompt's
+    /// "broken images are handled automatically" promise TRUE for Codex too.
+    private let imageValidationConfig: ResearchImageValidationConfig
+    /// Builds the image-validation fetch seam. Defaults to the real HTTP validator;
+    /// tests inject a deterministic fake so the pass never touches the network.
+    private let makeImageValidator: () -> ImageURLValidating
 
     /// Per-run mutable state, lock-guarded because it is written across the (nonisolated,
     /// async) engine methods and read on the main-actor follow-up path:
@@ -133,12 +141,18 @@ final class CodexResearchEngine: ResearchEngine {
         binaryPath: String,
         homeDirectoryPath: String = NSHomeDirectory(),
         executePhaseTimeoutSeconds: TimeInterval = 600,
-        manifestStore: ResearchManifestStore = .shared
+        manifestStore: ResearchManifestStore = .shared,
+        imageValidationConfig: ResearchImageValidationConfig = .default,
+        makeImageValidator: @escaping () -> ImageURLValidating = {
+            URLSessionImageURLValidator()
+        }
     ) {
         self.binaryPath = binaryPath
         self.homeDirectoryPath = homeDirectoryPath
         self.executePhaseTimeoutSeconds = executePhaseTimeoutSeconds
         self.manifestStore = manifestStore
+        self.imageValidationConfig = imageValidationConfig
+        self.makeImageValidator = makeImageValidator
     }
 
     /// The deterministic deliverable filename the execute prompt instructs Codex to
@@ -311,7 +325,28 @@ final class CodexResearchEngine: ResearchEngine {
         guard let deliverableURL = Self.locateDeliverable(in: outputDirectory) else {
             throw ResearchError.noDeliverableProduced
         }
+        // DETERMINISTIC image-validation pass (same as the Claude engine): before the
+        // page is ever shown, fetch every embedded remote <img> and rewrite report.html
+        // so any broken image becomes an inline "Image unavailable" placeholder. This is
+        // what makes the execute prompt's "broken images are handled automatically"
+        // promise true for Codex. Time-bounded (never hangs the run); skipped if the run
+        // was cancelled while draining.
+        if !Task.isCancelled {
+            await validateDeliverableImages(fileURL: deliverableURL)
+        }
         return deliverableURL
+    }
+
+    /// Runs the deterministic image-validation pass over a just-produced (or
+    /// just-rewritten) deliverable. Time-bounded by `imageValidationConfig` so it can
+    /// never hang the research run; a no-op when the page has no remote images; never
+    /// throws. Mirrors `ClaudeResearchEngine.validateDeliverableImages`.
+    private func validateDeliverableImages(fileURL: URL) async {
+        await ResearchImageValidator.validateAndRewriteDeliverable(
+            fileURL: fileURL,
+            validator: makeImageValidator(),
+            config: imageValidationConfig
+        )
     }
 
     // MARK: - Phase 3: voice-native follow-up (continue THIS thread)
@@ -363,6 +398,13 @@ final class CodexResearchEngine: ResearchEngine {
             modificationDateBeforeTurn: modificationDateBeforeTurn,
             modificationDateAfterTurn: modificationDateAfterTurn
         )
+        // An ITERATE follow-up rewrote report.html — re-run the same deterministic
+        // image-validation pass so a newly-embedded broken image can't slip through on
+        // the iteration. (A pure QUESTION writes nothing, so there's nothing to
+        // re-validate.) Runs before the caller reloads the WKWebView.
+        if deliverableWasRewritten, !Task.isCancelled {
+            await validateDeliverableImages(fileURL: URL(fileURLWithPath: deliverableAbsolutePath))
+        }
         return FollowUpPhaseResult(
             spokenAnswer: accumulator.lastResultText,
             deliverableWasRewritten: deliverableWasRewritten,
