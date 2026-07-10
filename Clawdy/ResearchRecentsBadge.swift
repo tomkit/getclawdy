@@ -527,7 +527,35 @@ final class ResearchRecentsBadgeController {
     /// `.zero`, so on-screen positioning is completely unchanged.
     var testAnchorOriginOffset: CGVector = .zero
 
+    /// The SINGLE shared user drag offset (the SAME value the toast stack uses) applied to
+    /// the badge's slot so dragging the badge moves the whole cluster and it survives every
+    /// re-show. The manager owns the canonical value and pushes it here; a live drag reports
+    /// a new value back via `onUserColumnDragged`.
+    private(set) var userColumnDragOffset: CGVector = .zero
+
+    /// Reports a NEW clamped drag offset (after the user dragged the badge window) up to the
+    /// manager, which persists it and syncs it back to both the badge and the toast stack.
+    var onUserColumnDragged: ((CGVector) -> Void)?
+
+    /// Non-zero while WE move the badge window programmatically (show / grow-open / applying
+    /// a synced offset). The `didMoveNotification` handler ignores moves while this is > 0 so
+    /// our own `setFrame`s — including an animated grow's intermediate frames — are never
+    /// read back as a user drag.
+    private var programmaticFrameChangeDepth = 0
+
+    /// A move smaller than this (points) is treated as noise / a settle, not a real drag.
+    private let dragMovementEpsilon: CGFloat = 0.5
+
     init() {
+        // Capture a user drag of the badge window (via `isMovableByWindowBackground`) into
+        // the shared column offset. `object: nil` catches every window; the handler filters
+        // to just this badge's window.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleBadgeWindowMoved(_:)),
+            name: NSWindow.didMoveNotification,
+            object: nil
+        )
         badgeModel.onTapBadge = { [weak self] in self?.openList() }
         badgeModel.onCloseList = { [weak self] in self?.collapseToResting() }
         badgeModel.onShowAllHistory = { [weak self] in
@@ -539,6 +567,10 @@ final class ResearchRecentsBadgeController {
             self?.collapseToResting()
             self?.onPerformRowAction?(action)
         }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     private var reduceMotionEnabled: Bool {
@@ -580,7 +612,8 @@ final class ResearchRecentsBadgeController {
         // phantom hitbox); it grows into the inline list on hover / tap. This is the
         // badge's OWN square window size, DISJOINT from the shared toast mini footprint.
         let size = ResearchRecentsLayout.restingWindowContentSize
-        let panel = ResearchToastPanel.makeOverlayPanel(size: size)
+        // Draggable by its background so the user can move the idle cluster out of the way.
+        let panel = ResearchToastPanel.makeOverlayPanel(size: size, isMovableByWindowBackground: true)
 
         let trackingView = ResearchRecentsBadgeTrackingView(frame: CGRect(origin: .zero, size: size))
         let hostingView = NSHostingView(rootView: ResearchRecentsBadgeRootView(model: badgeModel))
@@ -601,9 +634,13 @@ final class ResearchRecentsBadgeController {
 
     private func updateSlotTopLeft() {
         guard let rawVisibleFrame = NSScreen.main?.visibleFrame else { return }
-        // Shift the anchor by the test-only offset (production default `.zero`) so the badge
-        // (and its inline list, which hangs off the same slot) can position off-screen under tests.
-        let visibleFrame = rawVisibleFrame.offsetBy(dx: testAnchorOriginOffset.dx, dy: testAnchorOriginOffset.dy)
+        // Shift the anchor by the test-only offset (production default `.zero`) AND the
+        // user's shared drag offset, so the badge (and its inline list, which hangs off the
+        // same slot) honors a drag and positions off-screen under tests.
+        let visibleFrame = rawVisibleFrame.offsetBy(
+            dx: testAnchorOriginOffset.dx + userColumnDragOffset.dx,
+            dy: testAnchorOriginOffset.dy + userColumnDragOffset.dy
+        )
         currentSlotTopLeft = ResearchToastLayout.slotTopLeftOrigin(
             index: 0,
             corner: .topLeft,
@@ -663,15 +700,23 @@ final class ResearchRecentsBadgeController {
         // what keeps the Clawdy cursor showing while hovering the open list.
         trackingView?.setRegions(hoverRect: pillRect, cursorRect: pillRect)
 
+        // Raise the programmatic-move guard so the `didMoveNotification` handler ignores every
+        // frame WE set here (including an animated grow's intermediate frames) — only a real
+        // user drag should feed the shared column offset.
+        programmaticFrameChangeDepth += 1
         if animated {
             // Interpolate the window frame growth/collapse so it reads as growing open.
-            NSAnimationContext.runAnimationGroup { context in
+            NSAnimationContext.runAnimationGroup({ context in
                 context.duration = ResearchRecentsLayout.growthAnimationDuration
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 panel.animator().setFrame(frame, display: true)
-            }
+            }, completionHandler: { [weak self] in
+                guard let self else { return }
+                self.programmaticFrameChangeDepth = max(0, self.programmaticFrameChangeDepth - 1)
+            })
         } else {
             panel.setFrame(frame, display: true)
+            programmaticFrameChangeDepth = max(0, programmaticFrameChangeDepth - 1)
         }
         // Instrumentation (opt-in, item 2/4 runtime diagnosis): the resting state's window
         // size + pill rect + the on-screen pill rect are the authoritative determinants of
@@ -684,6 +729,59 @@ final class ResearchRecentsBadgeController {
                 + "pillScreenRect=\(NSStringFromRect(panel.convertToScreen(pillRect)))"
             )
         }
+    }
+
+    // MARK: - User drag capture
+
+    /// The badge window moved. When it's OUR window and the move wasn't ours
+    /// (`programmaticFrameChangeDepth == 0`), measure how far the user dragged it past its
+    /// laid-out origin, accumulate that into the shared column offset (clamped so the badge
+    /// stays on screen), and report the new offset up to the manager.
+    @objc private func handleBadgeWindowMoved(_ notification: Notification) {
+        guard programmaticFrameChangeDepth == 0 else { return }
+        guard let movedWindow = notification.object as? NSWindow, movedWindow === badgePanel else { return }
+        guard let rawVisibleFrame = NSScreen.main?.visibleFrame else { return }
+
+        // Where layout last placed the window (the window hangs down from `currentSlotTopLeft`,
+        // which already folds in the current drag offset).
+        let size = windowContentSize(for: visualState)
+        let expectedOrigin = ResearchToastLayout.windowOrigin(slotTopLeft: currentSlotTopLeft, contentSize: size)
+        let actualOrigin = movedWindow.frame.origin
+        let dragDelta = CGVector(dx: actualOrigin.x - expectedOrigin.x, dy: actualOrigin.y - expectedOrigin.y)
+        guard abs(dragDelta.dx) > dragMovementEpsilon || abs(dragDelta.dy) > dragMovementEpsilon else { return }
+
+        // The badge's visible pill rect at drag offset ZERO (only the test offset applied) —
+        // the reference the clamp keeps on screen.
+        let baseFrame = rawVisibleFrame.offsetBy(dx: testAnchorOriginOffset.dx, dy: testAnchorOriginOffset.dy)
+        let baseSlot = ResearchToastLayout.slotTopLeftOrigin(
+            index: 0,
+            corner: .topLeft,
+            visibleFrame: baseFrame,
+            edgeInset: ResearchRecentsLayout.screenEdgeInset
+        )
+        let baseWindowOrigin = ResearchToastLayout.windowOrigin(slotTopLeft: baseSlot, contentSize: size)
+        let pillRectInWindow = ResearchToastLayout.pillRect(inWindowOfSize: size, pillSize: contentPillSize(for: visualState))
+        let basePillScreenRect = CGRect(
+            x: baseWindowOrigin.x + pillRectInWindow.minX,
+            y: baseWindowOrigin.y + pillRectInWindow.minY,
+            width: pillRectInWindow.width,
+            height: pillRectInWindow.height
+        )
+        let newOffset = ResearchOverlayDragOffset.clamp(
+            ResearchOverlayDragOffset.accumulate(current: userColumnDragOffset, delta: dragDelta),
+            basePillScreenRect: basePillScreenRect,
+            visibleFrame: baseFrame
+        )
+        onUserColumnDragged?(newOffset)
+    }
+
+    /// Adopts a new shared drag offset (from the manager syncing a drag, or restoring the
+    /// persisted value) and re-places the badge window instantly so it shifts to it.
+    func applyUserColumnDragOffset(_ offset: CGVector) {
+        userColumnDragOffset = offset
+        guard badgePanel != nil else { return }
+        updateSlotTopLeft()
+        applyFrame(animated: false)
     }
 
     /// Transitions to a new visual state: the window frame + CONTENT morph are INTERPOLATED
@@ -791,6 +889,11 @@ final class ResearchRecentsBadgeController {
     // MARK: - Test hooks
 
     var badgePanelForTesting: NSPanel? { badgePanel }
+    /// The badge's current slot top-left (screen coords), so a test can prove a synced drag
+    /// offset shifts the badge's placement.
+    var slotTopLeftForTesting: CGPoint { currentSlotTopLeft }
+    /// The current shared drag offset, so a test can assert the manager synced it in.
+    var userColumnDragOffsetForTesting: CGVector { userColumnDragOffset }
     var isBadgeVisibleForTesting: Bool { badgePanel?.isVisible == true }
     var visualStateForTesting: ResearchRecentsBadgeVisualState { visualState }
     var isListOpenForTesting: Bool { visualState == .listOpen }

@@ -11,6 +11,7 @@
 
 import Testing
 import Foundation
+import CoreGraphics
 @testable import Clawdy
 
 struct DefaultsKeyTests {
@@ -29,6 +30,20 @@ struct DefaultsKeyTests {
         #expect(DefaultsKey.selectedTTSEngine.rawValue == "selectedTTSEngine")
         #expect(DefaultsKey.elevenLabsVoiceID.rawValue == "elevenLabsVoiceID")
         #expect(DefaultsKey.hasElevenLabsAPIKey.rawValue == "hasElevenLabsAPIKey")
+        #expect(DefaultsKey.researchOverlayDragOffset.rawValue == "researchOverlayColumnDragOffset")
+    }
+
+    /// The `CGVector` overloads round-trip through UserDefaults (the research overlay drag
+    /// offset), and reading an unset key returns nil so the caller can fall back to `.zero`.
+    @Test func vectorOverloadRoundTrips() {
+        let defaults = makeIsolatedDefaults()
+        defer { wipe(defaults) }
+
+        #expect(defaults.vector(forKey: .researchOverlayDragOffset) == nil)
+        defaults.set(CGVector(dx: 42.5, dy: -17.25), forKey: .researchOverlayDragOffset)
+        let restored = defaults.vector(forKey: .researchOverlayDragOffset)
+        #expect(restored?.dx == 42.5)
+        #expect(restored?.dy == -17.25)
     }
 
     /// The screen-content permission key carries NO namespace prefix — it must stay

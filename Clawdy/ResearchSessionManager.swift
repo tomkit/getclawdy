@@ -124,6 +124,18 @@ final class ResearchSessionManager: ObservableObject {
     /// the real panels/windows off-screen instead of flashing them at the top-left/center.
     private let testAnchorOriginOffset: CGVector
 
+    /// Where persisted UI state (currently just the overlay drag offset) is read/written.
+    /// Injectable so tests don't touch the real `.standard` defaults.
+    private let userDefaults: UserDefaults
+
+    /// The CANONICAL shared drag offset for the upper-left research overlay cluster — the
+    /// toast stack AND the idle recents badge both honor it, so dragging either moves both.
+    /// Owned here (the single source of truth), pushed into both controllers, and PERSISTED
+    /// to UserDefaults on every change so a moved position survives relaunch.
+    private var overlayColumnDragOffset: CGVector {
+        didSet { userDefaults.set(overlayColumnDragOffset, forKey: .researchOverlayDragOffset) }
+    }
+
     init(
         resolveClaudeBinaryPath: @escaping () -> String?,
         resolveResearchBinaryPath: ((CoachEngineKind) -> String?)? = nil,
@@ -135,9 +147,14 @@ final class ResearchSessionManager: ObservableObject {
         homeDirectoryPath: String = NSHomeDirectory(),
         manifestStore: ResearchManifestStore = .shared,
         audioCuePlayer: ResearchAudioCuePlayer = SystemSoundResearchAudioCuePlayer(),
-        testAnchorOriginOffset: CGVector = .zero
+        testAnchorOriginOffset: CGVector = .zero,
+        userDefaults: UserDefaults = .standard
     ) {
         self.testAnchorOriginOffset = testAnchorOriginOffset
+        self.userDefaults = userDefaults
+        // Restore the user's saved cluster drag offset (or `.zero` on first run). The initial
+        // assignment does not fire `didSet`, so restoring never re-persists.
+        self.overlayColumnDragOffset = userDefaults.vector(forKey: .researchOverlayDragOffset) ?? .zero
         self.resolveClaudeBinaryPath = resolveClaudeBinaryPath
         // Default the per-kind reconstruction binary resolver to Claude-only (codex → nil),
         // so a manager built with just `resolveClaudeBinaryPath` reconstructs Claude runs
@@ -184,6 +201,14 @@ final class ResearchSessionManager: ObservableObject {
         recentsBadge.testAnchorOriginOffset = testAnchorOriginOffset
         recentsResultsWindow.testAnchorOriginOffset = testAnchorOriginOffset
         stackedOverlay.onToggleExpandRequested = { [weak self] in self?.toggleStackExpansion() }
+
+        // Seed BOTH cluster surfaces with the restored drag offset (before the init-time
+        // `refreshOverlay()` below lays them out), and wire each one's live-drag report to the
+        // single central handler that persists + syncs the move to both.
+        stackedOverlay.applyUserColumnDragOffset(overlayColumnDragOffset)
+        recentsBadge.applyUserColumnDragOffset(overlayColumnDragOffset)
+        stackedOverlay.onUserColumnDragged = { [weak self] newOffset in self?.handleOverlayColumnDragged(newOffset) }
+        recentsBadge.onUserColumnDragged = { [weak self] newOffset in self?.handleOverlayColumnDragged(newOffset) }
 
         // Wire the always-present recents badge. Rows are pulled FRESH per list-open
         // from the SAME manifest source History reads (via `HistoryRowBuilder`), sliced
@@ -699,6 +724,16 @@ final class ResearchSessionManager: ObservableObject {
         // badge shows IFF there are zero active toasts, so exactly one of the two ever
         // occupies the top-left.
         updateRecentsBadgePresence(activeToastCount: pills.count)
+    }
+
+    /// The single central handler for a live drag reported by EITHER cluster surface (the
+    /// toast stack or the idle badge): store the new offset (which persists it via `didSet`),
+    /// then sync it to BOTH controllers so the whole cluster stays together and the hidden
+    /// surface adopts it too (only one of the two is ever on screen at a time).
+    private func handleOverlayColumnDragged(_ newOffset: CGVector) {
+        overlayColumnDragOffset = newOffset
+        stackedOverlay.applyUserColumnDragOffset(newOffset)
+        recentsBadge.applyUserColumnDragOffset(newOffset)
     }
 
     /// Shows the idle recents badge when nothing is toasting, hiding it the moment a

@@ -223,6 +223,47 @@ enum ResearchToastLayout {
     }
 }
 
+// MARK: - Pure user-drag offset (accumulate + on-screen clamp)
+
+/// Pure, AppKit-free math for the SINGLE shared drag offset the user applies to the
+/// upper-left research overlay cluster (the toast stack + the idle recents badge share
+/// ONE offset, so dragging either moves both). Kept value-in / value-out so the
+/// accumulation and the "keep the pill on screen" clamp are unit-testable with no windows.
+enum ResearchOverlayDragOffset {
+    /// Accumulates a live drag delta (how far the window moved past where layout placed it)
+    /// into the running offset. Additive so many small drag steps sum to the total move.
+    static func accumulate(current: CGVector, delta: CGVector) -> CGVector {
+        CGVector(dx: current.dx + delta.dx, dy: current.dy + delta.dy)
+    }
+
+    /// Clamps `offset` so the draggable pill — whose rect at offset ZERO is
+    /// `basePillScreenRect` — stays FULLY within `visibleFrame` once translated by the
+    /// offset. This is what stops the user from dragging the cluster entirely off-screen:
+    /// the visible pill always keeps its whole footprint on the screen's visible area.
+    static func clamp(_ offset: CGVector, basePillScreenRect: CGRect, visibleFrame: CGRect) -> CGVector {
+        // Allowed dx keeps the pill's [minX + dx, maxX + dx] inside the visible frame's
+        // horizontal span; likewise for dy. The lower bound moves the pill left/down until
+        // its leading/bottom edge touches the frame; the upper bound until its trailing/top
+        // edge touches.
+        let lowerBoundDX = visibleFrame.minX - basePillScreenRect.minX
+        let upperBoundDX = visibleFrame.maxX - basePillScreenRect.maxX
+        let lowerBoundDY = visibleFrame.minY - basePillScreenRect.minY
+        let upperBoundDY = visibleFrame.maxY - basePillScreenRect.maxY
+        return CGVector(
+            dx: clampValue(offset.dx, lowerBound: lowerBoundDX, upperBound: upperBoundDX),
+            dy: clampValue(offset.dy, lowerBound: lowerBoundDY, upperBound: upperBoundDY)
+        )
+    }
+
+    /// Clamps `value` into `[lowerBound, upperBound]`. If the pill is somehow LARGER than the
+    /// visible frame (lower > upper), pins to the lower bound so at least the pill's
+    /// leading/bottom edge stays anchored on screen rather than producing an empty range.
+    private static func clampValue(_ value: CGFloat, lowerBound: CGFloat, upperBound: CGFloat) -> CGFloat {
+        guard lowerBound <= upperBound else { return lowerBound }
+        return min(max(value, lowerBound), upperBound)
+    }
+}
+
 // MARK: - Clawdy red "shadow cursor" for toast hover
 
 /// Builds and caches the app's red Clawdy cursor (the same triangular "shadow cursor"
@@ -563,7 +604,8 @@ final class ResearchToastPanel {
 
         // The full toast footprint — one fixed window size (never a zero-size window).
         let size = ResearchToastLayout.expandedWindowContentSize
-        panel = ResearchToastPanel.makeOverlayPanel(size: size)
+        // Draggable by its pill background so the user can move the cluster out of the way.
+        panel = ResearchToastPanel.makeOverlayPanel(size: size, isMovableByWindowBackground: true)
 
         trackingView = ResearchToastHoverTrackingView(frame: CGRect(origin: .zero, size: size))
         let rootView = ResearchToastWindowRootView(
@@ -683,11 +725,18 @@ final class ResearchToastPanel {
     /// - `includesStationaryCollectionBehavior` defaults to `true` (`.stationary` pins the
     ///   overlay so it doesn't slide during Space transitions); the clarification panel
     ///   passes `false` to keep its historical collection behavior exactly.
+    /// - `isMovableByWindowBackground` defaults to `false`. The toast windows and the idle
+    ///   recents badge pass `true` so the user can DRAG the upper-left cluster out of the
+    ///   way by its dark pill background: AppKit moves the window on a background drag, while
+    ///   a click (no movement) still reaches the SwiftUI content and the controls (Stop / × /
+    ///   view results) consume their own mouse-down so they never start a drag. The control /
+    ///   detail / clarification panels keep the default `false`.
     static func makeOverlayPanel<PanelType: NSPanel>(
         size: CGSize,
         panelType: PanelType.Type = NSPanel.self,
         hasShadow: Bool = false,
-        includesStationaryCollectionBehavior: Bool = true
+        includesStationaryCollectionBehavior: Bool = true,
+        isMovableByWindowBackground: Bool = false
     ) -> PanelType {
         let panel = panelType.init(
             contentRect: CGRect(origin: .zero, size: size),
@@ -701,6 +750,7 @@ final class ResearchToastPanel {
         panel.hasShadow = hasShadow
         panel.ignoresMouseEvents = false
         panel.hidesOnDeactivate = false
+        panel.isMovableByWindowBackground = isMovableByWindowBackground
         // NB: do NOT set `isFloatingPanel` — it forces the level back to `.floating`,
         // sinking the overlay below other status-bar-level UI.
         var collectionBehavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -1113,7 +1163,42 @@ final class ResearchStackedOverlayController {
     /// offset that defaults to production, never a behavior flag that could ship enabled.
     var testAnchorOriginOffset: CGVector = .zero
 
-    init() {}
+    /// The SINGLE shared user drag offset applied to the whole cluster (toasts + controls),
+    /// added to the anchor's visible frame exactly like `testAnchorOriginOffset` so every
+    /// window honors it and it survives every `refreshOverlay`. The manager owns the
+    /// canonical value (persisted to UserDefaults) and pushes it here; a live drag reports a
+    /// new value back via `onUserColumnDragged`.
+    private(set) var userColumnDragOffset: CGVector = .zero
+
+    /// Reports a NEW clamped drag offset (after the user dragged a toast window) up to the
+    /// manager, which persists it and syncs it back to both this overlay and the badge.
+    var onUserColumnDragged: ((CGVector) -> Void)?
+
+    /// Non-zero while WE are moving windows programmatically (a render, a fan-out/collapse
+    /// animation, or applying a synced drag offset). The `NSWindow.didMoveNotification`
+    /// handler ignores moves while this is > 0 so our own `setFrame`s — including the
+    /// intermediate frames of an animated move — are never mistaken for a user drag. A
+    /// counter (not a Bool) so overlapping non-animated + animated layouts can't clear it early.
+    private var programmaticFrameChangeDepth = 0
+
+    /// A move smaller than this (points) is treated as noise / a settle, not a real drag.
+    private let dragMovementEpsilon: CGFloat = 0.5
+
+    init() {
+        // Observe window moves so a user drag of any toast (via `isMovableByWindowBackground`)
+        // is captured into the shared column offset. `object: nil` catches every window; the
+        // handler filters to just this overlay's toast windows.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleToastWindowMoved(_:)),
+            name: NSWindow.didMoveNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
 
     /// The manager's handler for tapping the "+N more" / "show less" control.
     var onToggleExpandRequested: (() -> Void)?
@@ -1221,55 +1306,169 @@ final class ResearchStackedOverlayController {
     ///     it offset DOWN by the peek, scaled + dimmed, ordered front-to-back.
     /// The manager's "+N more" / "show less" control and the collapse-to-stack control are
     /// laid out beneath the toasts (visible only when fanned/list; hidden while stacked).
+    /// The anchor screen's visible frame shifted by BOTH the test-only positioning offset
+    /// (production default `.zero`) AND the user's shared drag offset, so every panel this
+    /// overlay lays out honors a drag and it survives every `refreshOverlay`. Nil when no
+    /// screen is available.
+    private func effectiveVisibleFrame() -> CGRect? {
+        guard let rawVisibleFrame = NSScreen.main?.visibleFrame else { return nil }
+        return rawVisibleFrame.offsetBy(
+            dx: testAnchorOriginOffset.dx + userColumnDragOffset.dx,
+            dy: testAnchorOriginOffset.dy + userColumnDragOffset.dy
+        )
+    }
+
+    /// The slot top-left (screen coords) for the toast at `index` under `presentation`,
+    /// using the full-toast stride for the list/fanned forms and the compact peek stride for
+    /// the stacked form. Shared by `layoutAllPanels`, the drag-capture handler, and the test
+    /// hook so they can never disagree on where a toast "should" be.
+    private func plannedSlotTopLeft(
+        forIndex index: Int,
+        visibleFrame: CGRect,
+        presentation: ResearchStackFanLayout.Presentation
+    ) -> CGPoint {
+        let stride: CGFloat = presentation == .stacked
+            ? ResearchStackFanLayout.stackedCardPeek
+            : ResearchToastLayout.fullToastSlotStride
+        return ResearchToastLayout.slotTopLeftOrigin(
+            index: index,
+            corner: anchorCorner,
+            visibleFrame: visibleFrame,
+            edgeInset: screenEdgeInset,
+            stride: stride
+        )
+    }
+
+    /// The window (bottom-left) origin a toast at `index` is placed at — the same value
+    /// `place(slotTopLeft:)` computes — so the drag handler can measure how far the user
+    /// dragged a window PAST where layout put it.
+    private func plannedWindowOrigin(
+        forIndex index: Int,
+        visibleFrame: CGRect,
+        presentation: ResearchStackFanLayout.Presentation
+    ) -> CGPoint {
+        let slotTopLeft = plannedSlotTopLeft(forIndex: index, visibleFrame: visibleFrame, presentation: presentation)
+        return ResearchToastLayout.windowOrigin(
+            slotTopLeft: slotTopLeft,
+            contentSize: ResearchToastLayout.expandedWindowContentSize
+        )
+    }
+
     private func layoutAllPanels(animated: Bool) {
-        guard let rawVisibleFrame = NSScreen.main?.visibleFrame else { return }
-        // Shift every panel's shared anchor by the test-only offset (production default
-        // `.zero`) so the whole column can be positioned off-screen under tests.
-        let visibleFrame = rawVisibleFrame.offsetBy(dx: testAnchorOriginOffset.dx, dy: testAnchorOriginOffset.dy)
+        guard let visibleFrame = effectiveVisibleFrame() else { return }
         let presentation = self.presentation
         let animatesTransition = animated && !reduceMotionEnabled
 
-        for (index, id) in orderedVisibleIDs.enumerated() {
-            guard let panel = toastPanelsByID[id] else { continue }
-            switch presentation {
-            case .list, .fanned:
-                let slotTopLeft = ResearchToastLayout.slotTopLeftOrigin(
-                    index: index,
-                    corner: anchorCorner,
-                    visibleFrame: visibleFrame,
-                    edgeInset: screenEdgeInset,
-                    stride: ResearchToastLayout.fullToastSlotStride
-                )
-                panel.applyStackPresentation(scale: 1.0, opacity: 1.0, animatesTransition: animatesTransition)
+        // Guard the whole layout pass: every `setFrame` we issue here (including an animated
+        // move's intermediate frames) must not be read back as a user drag. Keyed on the raw
+        // `animated` flag (not `animatesTransition`) because the WINDOW frame still animates
+        // under Reduce Motion — only the SwiftUI scale/opacity transition is suppressed — so
+        // the group must wrap every animated `place` for the guard to cover its late frames.
+        performProgrammaticFrameChanges(animated: animated) {
+            for (index, id) in self.orderedVisibleIDs.enumerated() {
+                guard let panel = self.toastPanelsByID[id] else { continue }
+                let slotTopLeft = self.plannedSlotTopLeft(forIndex: index, visibleFrame: visibleFrame, presentation: presentation)
+                switch presentation {
+                case .list, .fanned:
+                    panel.applyStackPresentation(scale: 1.0, opacity: 1.0, animatesTransition: animatesTransition)
+                case .stacked:
+                    let transform = ResearchStackFanLayout.stackedCardTransform(depthFromFront: index)
+                    panel.applyStackPresentation(
+                        scale: transform.scale,
+                        opacity: transform.opacity,
+                        animatesTransition: animatesTransition
+                    )
+                }
                 panel.place(slotTopLeft: slotTopLeft, animated: animated)
-            case .stacked:
-                let transform = ResearchStackFanLayout.stackedCardTransform(depthFromFront: index)
-                let slotTopLeft = ResearchToastLayout.slotTopLeftOrigin(
-                    index: index,
-                    corner: anchorCorner,
-                    visibleFrame: visibleFrame,
-                    edgeInset: screenEdgeInset,
-                    stride: ResearchStackFanLayout.stackedCardPeek
-                )
-                panel.applyStackPresentation(
-                    scale: transform.scale,
-                    opacity: transform.opacity,
-                    animatesTransition: animatesTransition
-                )
-                panel.place(slotTopLeft: slotTopLeft, animated: animated)
+                panel.show()
             }
-            panel.show()
-        }
 
-        // In the stacked form, the FRONT card (index 0) must sit above the ones peeking
-        // behind it — order back-to-front so index 0 ends up frontmost.
-        if presentation == .stacked {
-            for id in orderedVisibleIDs.reversed() {
-                toastPanelsByID[id]?.orderFront()
+            // In the stacked form, the FRONT card (index 0) must sit above the ones peeking
+            // behind it — order back-to-front so index 0 ends up frontmost.
+            if presentation == .stacked {
+                for id in self.orderedVisibleIDs.reversed() {
+                    self.toastPanelsByID[id]?.orderFront()
+                }
             }
-        }
 
-        layoutControls(visibleFrame: visibleFrame, presentation: presentation, animated: animated)
+            self.layoutControls(visibleFrame: visibleFrame, presentation: presentation, animated: animated)
+        }
+    }
+
+    /// Runs `body` (which issues `setFrame`s) with the programmatic-move guard raised, so the
+    /// `didMoveNotification` handler ignores every frame WE set. For an animated pass the
+    /// guard stays raised until the animation group's completion (covering the animation's
+    /// intermediate frames); for an instant pass it drops as soon as `body` returns.
+    private func performProgrammaticFrameChanges(animated: Bool, _ body: () -> Void) {
+        programmaticFrameChangeDepth += 1
+        if animated {
+            NSAnimationContext.runAnimationGroup({ _ in
+                body()
+            }, completionHandler: { [weak self] in
+                guard let self else { return }
+                self.programmaticFrameChangeDepth = max(0, self.programmaticFrameChangeDepth - 1)
+            })
+        } else {
+            body()
+            programmaticFrameChangeDepth = max(0, programmaticFrameChangeDepth - 1)
+        }
+    }
+
+    // MARK: - User drag capture
+
+    /// A toast window moved. When it's one of OUR toast windows and the move wasn't ours
+    /// (`programmaticFrameChangeDepth == 0`), measure how far the user dragged it past its
+    /// laid-out origin, accumulate that into the shared column offset (clamped so the pill
+    /// stays on screen), and report the new offset up to the manager.
+    @objc private func handleToastWindowMoved(_ notification: Notification) {
+        guard programmaticFrameChangeDepth == 0 else { return }
+        guard let movedWindow = notification.object as? NSWindow else { return }
+        guard let movedEntry = toastPanelsByID.first(where: { $0.value.panel === movedWindow }) else { return }
+        guard let index = orderedVisibleIDs.firstIndex(of: movedEntry.key) else { return }
+        guard let effectiveFrame = effectiveVisibleFrame() else { return }
+
+        let presentation = self.presentation
+        let expectedOrigin = plannedWindowOrigin(forIndex: index, visibleFrame: effectiveFrame, presentation: presentation)
+        let actualOrigin = movedWindow.frame.origin
+        let dragDelta = CGVector(dx: actualOrigin.x - expectedOrigin.x, dy: actualOrigin.y - expectedOrigin.y)
+        guard abs(dragDelta.dx) > dragMovementEpsilon || abs(dragDelta.dy) > dragMovementEpsilon else { return }
+
+        guard let basePillScreenRect = baseAnchorPillScreenRect(presentation: presentation),
+              let rawVisibleFrame = NSScreen.main?.visibleFrame else { return }
+        // Clamp against the anchor screen's visible frame shifted ONLY by the test offset
+        // (never the drag offset), so the clamp bound is the real screen in production.
+        let clampVisibleFrame = rawVisibleFrame.offsetBy(dx: testAnchorOriginOffset.dx, dy: testAnchorOriginOffset.dy)
+        let newOffset = ResearchOverlayDragOffset.clamp(
+            ResearchOverlayDragOffset.accumulate(current: userColumnDragOffset, delta: dragDelta),
+            basePillScreenRect: basePillScreenRect,
+            visibleFrame: clampVisibleFrame
+        )
+        onUserColumnDragged?(newOffset)
+    }
+
+    /// The screen rect the TOP anchor toast's visible pill occupies at drag offset ZERO (only
+    /// the test offset applied) — the reference the clamp keeps on screen. Nil when no screen.
+    private func baseAnchorPillScreenRect(presentation: ResearchStackFanLayout.Presentation) -> CGRect? {
+        guard let rawVisibleFrame = NSScreen.main?.visibleFrame else { return nil }
+        let baseFrame = rawVisibleFrame.offsetBy(dx: testAnchorOriginOffset.dx, dy: testAnchorOriginOffset.dy)
+        let windowOrigin = plannedWindowOrigin(forIndex: 0, visibleFrame: baseFrame, presentation: presentation)
+        let pillRectInWindow = ResearchToastLayout.pillRect(
+            inWindowOfSize: ResearchToastLayout.expandedWindowContentSize,
+            pillSize: ResearchStackFrameLayout.expandedPillSize
+        )
+        return CGRect(
+            x: windowOrigin.x + pillRectInWindow.minX,
+            y: windowOrigin.y + pillRectInWindow.minY,
+            width: pillRectInWindow.width,
+            height: pillRectInWindow.height
+        )
+    }
+
+    /// Adopts a new shared drag offset (from the manager syncing a drag, or restoring the
+    /// persisted value) and re-lays out instantly so the whole cluster shifts to it.
+    func applyUserColumnDragOffset(_ offset: CGVector) {
+        userColumnDragOffset = offset
+        layoutAllPanels(animated: false)
     }
 
     // MARK: - Native-stack fan-out hover
@@ -1677,21 +1876,14 @@ final class ResearchStackedOverlayController {
     /// vs stacked positioning without depending on the animated window frame (which settles
     /// asynchronously).
     func slotTopLeftForTesting(id: ResearchSessionID) -> CGPoint? {
-        guard let rawVisibleFrame = NSScreen.main?.visibleFrame,
+        guard let visibleFrame = effectiveVisibleFrame(),
               let index = orderedVisibleIDs.firstIndex(of: id) else { return nil }
-        // Apply the same test-only anchor offset `layoutAllPanels` uses (production default
-        // `.zero`, an identity) so this reports the ACTUAL laid-out slot origin — including
-        // when the controller is anchored off-screen for a test — never the unshifted one.
-        let visibleFrame = rawVisibleFrame.offsetBy(dx: testAnchorOriginOffset.dx, dy: testAnchorOriginOffset.dy)
-        let stride: CGFloat = presentation == .stacked
-            ? ResearchStackFanLayout.stackedCardPeek
-            : ResearchToastLayout.fullToastSlotStride
-        return ResearchToastLayout.slotTopLeftOrigin(
-            index: index,
-            corner: anchorCorner,
-            visibleFrame: visibleFrame,
-            edgeInset: screenEdgeInset,
-            stride: stride
-        )
+        // `effectiveVisibleFrame()` already folds in BOTH the test-only anchor offset
+        // (production `.zero`) AND the user's drag offset, so this reports the ACTUAL
+        // laid-out slot origin `layoutAllPanels` uses — including after a drag.
+        return plannedSlotTopLeft(forIndex: index, visibleFrame: visibleFrame, presentation: presentation)
     }
+
+    /// The current shared drag offset, so a test can assert the manager synced it in.
+    var userColumnDragOffsetForTesting: CGVector { userColumnDragOffset }
 }
