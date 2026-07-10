@@ -1331,8 +1331,10 @@ final class CompanionManager: ObservableObject {
             // Kick off the screenshot capture NOW, while the user is still
             // speaking, so it overlaps the recording instead of adding its latency
             // serially after the transcript lands. The result is awaited in
-            // sendTranscriptToClaudeWithScreenshot. Self-exclusion (sharingType
-            // .none) and silent capture are unchanged — they live in the utility.
+            // sendTranscriptToClaudeWithScreenshot. Self-exclusion (Clawdy's own
+            // overlays are `.readOnly` but kept out of the model screenshots by
+            // application-level exclusion) and silent capture are unchanged — they
+            // live in the utility.
             pendingScreenCaptureTask?.cancel()
             pendingScreenCaptureTask = Task {
                 try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()

@@ -12,8 +12,10 @@
 //  state and pushing it here. The window/stack lifecycle — which pills are on
 //  screen, which is focused, auto-hide — lives in the stacked controller, not here.
 //
-//  All windows that host these views set `sharingType = .none` so they never leak
-//  into the screenshots a research run might capture.
+//  All windows that host these views set `sharingType = .readOnly` (visible to
+//  external screen recorders); they are kept out of the screenshots a research run
+//  might capture by application-level exclusion in the capture path, not by
+//  `sharingType`.
 //
 
 import Combine
@@ -564,7 +566,8 @@ private struct ResearchMiniProgressRing: View {
 ///   - a TEXT INPUT area at the very bottom that submits a typed follow-up
 ///     (`onSubmitFollowUp`, per-session FIFO, subscription-billed).
 /// The whole surface wears the shared Clawdy red-aura glow so it matches the other Clawdy
-/// surfaces; the hosting panel is `sharingType = .none` (never captured).
+/// surfaces; the hosting panel is `sharingType = .readOnly` (visible to external
+/// recorders; kept out of Clawdy's own model screenshots by app-level exclusion).
 struct ResearchDetailOverlayView: View {
     @ObservedObject var viewModel: ResearchProgressOverlayViewModel
 

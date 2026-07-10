@@ -147,16 +147,33 @@ final class MenuBarPanelManager: NSObject {
     }
 
     private func createPanel() {
+        panel = MenuBarPanelManager.makeMenuBarPanel(
+            companionManager: companionManager,
+            width: panelWidth,
+            height: panelHeight
+        )
+    }
+
+    /// Builds the menu-bar dropdown panel. This lives in a STATIC factory (rather than
+    /// only inline in `createPanel`) so the capturability contract test can build the
+    /// REAL panel — and pin its `sharingType` — WITHOUT constructing the whole manager,
+    /// whose `init` spawns an `NSStatusItem` that can't render its icon in a headless
+    /// test host. `createPanel` delegates here verbatim, so there is no behavior change.
+    static func makeMenuBarPanel(
+        companionManager: CompanionManager,
+        width: CGFloat,
+        height: CGFloat
+    ) -> NSPanel {
         let companionPanelView = CompanionPanelView(companionManager: companionManager)
-            .frame(width: panelWidth)
+            .frame(width: width)
 
         let hostingView = NSHostingView(rootView: companionPanelView)
-        hostingView.frame = NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight)
+        hostingView.frame = NSRect(x: 0, y: 0, width: width, height: height)
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = .clear
 
         let menuBarPanel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -173,14 +190,16 @@ final class MenuBarPanelManager: NSObject {
         menuBarPanel.isMovableByWindowBackground = false
         menuBarPanel.titleVisibility = .hidden
         menuBarPanel.titlebarAppearsTransparent = true
-        // Never let this panel appear in screenshots we send to the model. With
-        // .none, ScreenCaptureKit skips this window regardless of whether the
-        // shareable-content enumeration is cached or fresh (so self-exclusion
-        // doesn't depend on a live window snapshot).
+        // Never let this settings/engine-picker panel appear in Clawdy's own model
+        // screenshots OR in an external screen recording — it can show engine choice /
+        // hints. With `.none`, ScreenCaptureKit skips this window regardless of whether
+        // the shareable-content enumeration is cached or fresh (so self-exclusion
+        // doesn't depend on a live window snapshot). This is the ONE overlay that stays
+        // `.none`; the cursor/annotation/research overlays are all `.readOnly` now.
         menuBarPanel.sharingType = .none
 
         menuBarPanel.contentView = hostingView
-        panel = menuBarPanel
+        return menuBarPanel
     }
 
     private func positionPanelBelowStatusItem() {

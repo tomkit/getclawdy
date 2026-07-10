@@ -7,14 +7,16 @@
 //  feels like it came from the companion and stays inside Clawdy's UX. The HTML
 //  file is kept on disk (in the per-run temp dir) so the window can be reopened.
 //
-//  Unlike Clawdy's transient chrome (overlays, pills, panels — all
-//  `sharingType = .none`), this window is deliberately CAPTURABLE (default
-//  `.readOnly` sharing). The generated deliverable is content the user opened and
-//  wants Clawdy to see: when they hold push-to-talk over the open results window
-//  to iterate on it, the screenshot must contain the rendered page rather than
-//  whatever is behind it. Besides the default sharing type, the window registers
-//  its window number in `CompanionScreenCaptureUtility.capturableOwnWindowNumbers`
-//  while visible so the capture path's blanket own-app-window exclusion exempts it.
+//  Every Clawdy overlay is `sharingType = .readOnly` (visible to external screen
+//  recorders), and this window is too — but it differs from the transient chrome in
+//  how it relates to Clawdy's OWN MODEL screenshots. The chrome is EXCLUDED from those
+//  screenshots by the capture path's blanket own-app-window exclusion, whereas this
+//  window is deliberately EXEMPTED so it STAYS in them: the generated deliverable is
+//  content the user opened and wants Clawdy to see, so when they hold push-to-talk over
+//  the open results window to iterate on it, the screenshot must contain the rendered
+//  page rather than whatever is behind it. To get that exemption the window registers
+//  its window number in `CompanionScreenCaptureUtility.capturableOwnWindowNumbers` while
+//  visible, which re-includes it via `exceptingWindows` past the app-level exclusion.
 //
 
 import AppKit

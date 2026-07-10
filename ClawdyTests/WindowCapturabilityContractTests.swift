@@ -159,23 +159,45 @@ struct WindowCapturabilityContractTests {
         }
     }
 
+    // MARK: - The ONE non-capturable overlay: the menu-bar dropdown
+
+    /// The menu-bar dropdown panel is `.none` — NON-capturable — so the settings /
+    /// engine-picker / hints it renders never leak into a screen recording, even though
+    /// every OTHER Clawdy overlay is now `.readOnly` (visible to recorders). Built
+    /// through the manager's REAL panel factory (`MenuBarPanelManager.makeMenuBarPanel`,
+    /// which `createPanel` delegates to) so a regression that flips it to `.readOnly`
+    /// (leaking the settings into a demo) fails here. We use the static factory rather
+    /// than constructing the whole manager because the manager's `init` spawns an
+    /// `NSStatusItem` whose icon can't render in a headless test host.
+    @Test func menuBarPanelIsNeverCapturable() {
+        let panel = MenuBarPanelManager.makeMenuBarPanel(
+            companionManager: CompanionManager(),
+            width: 320,
+            height: 380
+        )
+        #expect(panel.sharingType == NSWindow.SharingType.none,
+                "the menu-bar dropdown must never be visible to screen recorders (.none)")
+
+        // Contrast pin: an overlay built alongside is `.readOnly`, so this locks the
+        // exact divergence — settings chrome stays hidden while demo overlays show.
+        if let screen = anyScreen() {
+            #expect(OverlayWindow(screen: screen).sharingType == .readOnly,
+                    "overlays are visible to recorders (.readOnly) while the menu panel stays .none")
+        }
+    }
+
     /// DOCUMENTATION (not an assertion target): chrome surfaces that cannot be pinned
     /// here because they expose no headless test seam — their panels are private and the
-    /// sharing type is set inside a private `show()`/`create…()` method, so reaching them
-    /// would require adding a production accessor (out of scope for this test-only
-    /// change):
+    /// sharing type is set inside a private `show()`/`create…()` method:
     ///   • ResearchClarificationPanelManager — private `panel`, built via the shared
     ///     `ResearchToastPanel.makeOverlayPanel`, so its `sharingType` is `.readOnly`
     ///     (visible to recorders) like the other research chrome; the factory itself is
     ///     pinned in `ResearchOverlayPanelFactoryTests`.
-    ///   • MenuBarPanelManager                — private `panel`, `.none` ALWAYS (the sole
-    ///     overlay excluded from recordings so the settings/engine picker never leaks
-    ///     into a demo); constructing the manager also needs a `CompanionManager` and
-    ///     spawns an `NSStatusItem`.
+    /// (The menu-bar panel USED to live here; it is now pinned directly by
+    /// `menuBarPanelIsNeverCapturable` above via a read-only test seam.)
     /// These are asserted-by-source-review only; if a seam is added later, fold them into
     /// `windowCapturabilityContractHoldsAcrossInstantiableSurfaces`.
     static let capturabilityContractSkippedSurfaces = [
         "ResearchClarificationPanelManager.panel",
-        "MenuBarPanelManager.panel",
     ]
 }

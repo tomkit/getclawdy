@@ -9,8 +9,9 @@
 //  visible toasts and hides it the instant a run's toast takes over that spot.
 //
 //  The badge is its OWN independent, transparent `NSPanel` built the SAME way as a
-//  per-toast window (`sharingType = .none`, `.statusBar` level, all-Spaces,
-//  non-activating). It has TWO visual states, and — mirroring the reconciled per-toast
+//  per-toast window (`sharingType = .readOnly` — visible to external recorders, kept
+//  out of Clawdy's own model screenshots by app-level exclusion — `.statusBar` level,
+//  all-Spaces, non-activating). It has TWO visual states, and — mirroring the reconciled per-toast
 //  window fix (`ResearchToastPanel`) — the window frame, hover tracking region, and
 //  Clawdy-cursor region are all sized to the CURRENT state, never to the largest
 //  footprint at rest:

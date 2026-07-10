@@ -9,8 +9,10 @@
 //
 //  Unlike the click-through cursor overlays, this panel MUST take keyboard focus
 //  so the user can type — so it's a key-able borderless NSPanel. Its window is
-//  `sharingType = .none` so it never leaks into screenshots. Voice answering is a
-//  later phase; Slice 1 is text input only.
+//  `sharingType = .readOnly` (visible to external screen recorders like the other
+//  overlays); it is kept out of Clawdy's OWN model screenshots by application-level
+//  exclusion in the capture path, not by `sharingType`. Voice answering is a later
+//  phase; Slice 1 is text input only.
 //
 
 import AppKit
