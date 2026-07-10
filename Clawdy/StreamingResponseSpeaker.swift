@@ -195,6 +195,21 @@ final class StreamingResponseSpeaker {
     }
 
     private func speakOneUtterance(_ text: String, preferElevenLabs: Bool) async {
+        // Reserve this clip's ordinal UP FRONT when it is an ElevenLabs-intended clip, so the
+        // report carries the right ordinal (0 = first sentence, 1 = batched remainder) whether
+        // we get real timing OR fall back to Apple. BLOCKER 3: the manager's audio-sync
+        // scheduler waits for the report of the clip a POINT lands in — if an ElevenLabs clip
+        // falls back to Apple and emits NO report, that wait would hang ~12s and strand the
+        // cursor. Emitting a report on EVERY path (timing on success, nil alignment on
+        // fallback) lets the scheduler degrade PROMPTLY to the untimed walk for that clip.
+        let elevenLabsClipOrdinal: Int?
+        if preferElevenLabs {
+            elevenLabsClipOrdinal = elevenLabsClipsSpokenCount
+            elevenLabsClipsSpokenCount += 1
+        } else {
+            elevenLabsClipOrdinal = nil
+        }
+
         if preferElevenLabs {
             // ON-DEMAND secret read: only reached when ElevenLabs is the active
             // provider AND we're about to synthesize this utterance.
@@ -207,13 +222,14 @@ final class StreamingResponseSpeaker {
                 // clip's own (zero-based) timeline — never a global one.
                 let clipTiming = try await elevenLabsTTSClient.speakTextReportingTiming(text)
                 markPlaybackStartedIfNeeded()
-                let clipOrdinal = elevenLabsClipsSpokenCount
-                elevenLabsClipsSpokenCount += 1
-                onClipSpoken?(SpokenClipReport(clipOrdinal: clipOrdinal, clipText: text, timing: clipTiming))
+                if let elevenLabsClipOrdinal {
+                    onClipSpoken?(SpokenClipReport(clipOrdinal: elevenLabsClipOrdinal, clipText: text, timing: clipTiming))
+                }
                 await waitForPlaybackToFinish(isPlaying: { [weak self] in self?.elevenLabsTTSClient.isPlaying ?? false })
                 return
             } catch {
-                // Cancellation must NOT fall back (the user spoke again).
+                // Cancellation must NOT fall back (the user spoke again). No report is
+                // emitted: the turn (and its scheduler) is being torn down anyway.
                 guard TTSProviderSelection.shouldFallBackToApple(for: error) else { return }
                 didFallBackToApple = true
                 print("⚠️ ElevenLabs streaming TTS failed, falling back to Apple: \(error)")
@@ -224,8 +240,20 @@ final class StreamingResponseSpeaker {
         do {
             try await appleTTSClient.speakText(text)
             markPlaybackStartedIfNeeded()
+            // BLOCKER 3: if this was an ElevenLabs-intended clip that fell back to Apple,
+            // STILL report it — with NO alignment — so the scheduler waiting on this clip
+            // degrades to the untimed walk at once instead of blocking on a report that
+            // would otherwise never arrive.
+            if let elevenLabsClipOrdinal {
+                onClipSpoken?(SpokenClipReport(clipOrdinal: elevenLabsClipOrdinal, clipText: text, timing: .none))
+            }
             await waitForPlaybackToFinish(isPlaying: { [weak self] in self?.appleTTSClient.isPlaying ?? false })
         } catch {
+            // Even if Apple ALSO failed, emit the nil-alignment report so a scheduler
+            // waiting on this clip is released rather than left hanging.
+            if let elevenLabsClipOrdinal {
+                onClipSpoken?(SpokenClipReport(clipOrdinal: elevenLabsClipOrdinal, clipText: text, timing: .none))
+            }
             print("⚠️ Apple streaming TTS error: \(error)")
         }
     }

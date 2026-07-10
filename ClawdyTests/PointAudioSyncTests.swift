@@ -28,6 +28,14 @@ final class FakeNoTimingTTSClient: SpeechTTSProviding {
     // default, which speaks via speakText and returns SpokenClipTiming.none.
 }
 
+/// Collects the clip reports the streaming speaker emits, so a test can assert a report is
+/// emitted even when a clip falls back to Apple (BLOCKER 3 — the anti-hang guarantee).
+@MainActor
+final class ClipReportCollector {
+    private(set) var reports: [SpokenClipReport] = []
+    func record(_ report: SpokenClipReport) { reports.append(report) }
+}
+
 struct PointAudioSyncTests {
 
     /// Builds a clip alignment where each character starts at index * 0.1s (so the audio
@@ -133,56 +141,104 @@ struct PointAudioSyncTests {
         #expect(fireTime == nil)
     }
 
-    // MARK: - Per-clip re-basing (TRAP 2)
+    // MARK: - One consistent coordinate system + clip boundary (BLOCKER 2)
 
-    /// A point whose spoken position lands in clip 1 (the batched remainder) must be
-    /// re-based to clip 1's OWN zero — clip 1's alignment starts at 0, so its positions are
-    /// measured from the start of clip 1's text, not the global spoken text.
-    @Test func clipAssignmentRebasesClipTwoPositionsToClipTwoZero() {
-        let firstClipTextLength = 20
-
-        // Position 5 is inside clip 0 → clip 0, unchanged.
-        let inClipZero = PointAudioSyncMapper.clipAssignment(spokenPosition: 5, firstClipTextLength: firstClipTextLength)
-        #expect(inClipZero.clipOrdinal == 0)
-        #expect(inClipZero.positionInClip == 5)
-
-        // Position 33 is past clip 0 → clip 1, re-based to 33 - 20 = 13 (NOT 33).
-        let inClipOne = PointAudioSyncMapper.clipAssignment(spokenPosition: 33, firstClipTextLength: firstClipTextLength)
-        #expect(inClipOne.clipOrdinal == 1)
-        #expect(inClipOne.positionInClip == 13)
+    /// A clip is located within the spoken text so point positions and the clip boundary
+    /// share ONE ruler (the spoken text), including the inter-clip separator whitespace.
+    @Test func clipStartOffsetLocatesEachClipInTheSpokenText() {
+        let spokenText = "First sentence. Second sentence."
+        // Clip 0 "First sentence." starts at 0.
+        #expect(PointAudioSyncMapper.clipStartOffset(of: "First sentence.", in: spokenText, from: 0) == 0)
+        // Clip 1 "Second sentence." starts at 16 (after "First sentence." + the separator space).
+        #expect(PointAudioSyncMapper.clipStartOffset(of: "Second sentence.", in: spokenText, from: 15) == 16)
+        // A clip whose text isn't present returns nil (caller falls back to a running cursor).
+        #expect(PointAudioSyncMapper.clipStartOffset(of: "not here", in: spokenText, from: 0) == nil)
     }
 
-    @Test func clipAssignmentPutsTheBoundaryPositionIntoClipOne() {
-        // Exactly at the boundary belongs to clip 1 (clip 0 is [0, len)).
-        let assignment = PointAudioSyncMapper.clipAssignment(spokenPosition: 20, firstClipTextLength: 20)
-        #expect(assignment.clipOrdinal == 1)
-        #expect(assignment.positionInClip == 0)
+    /// BLOCKER 2: a POINT tag right after clip 0's final word/punctuation is anchored to
+    /// clip 0 and must map to clip 0's alignment/playhead — NOT clip 1's. The old
+    /// `spokenPosition == firstClipTextLength -> clip 1` rule mis-routed exactly this case.
+    @Test func aPointAtTheEndOfClipZeroMapsToClipZeroNotClipOne() throws {
+        // Spoken text is two clips. A [POINT] tag sat right after clip 0's last word, so its
+        // spoken position lands at clip 0's end (or in the separator before clip 1).
+        let spokenText = "open the run panel then quit"
+        let clipZeroText = "open the run panel"      // clip 0
+        let clipOneText = "then quit"                // clip 1 (batched remainder)
+
+        let clipZeroStart = try #require(PointAudioSyncMapper.clipStartOffset(of: clipZeroText, in: spokenText, from: 0))
+        let clipZeroEnd = clipZeroStart + clipZeroText.count // 18
+        let clipOneStart = try #require(PointAudioSyncMapper.clipStartOffset(of: clipOneText, in: spokenText, from: clipZeroEnd)) // 19
+
+        // A tag right after clip 0's last word "panel" sits at position 18 (its end / the
+        // separator space). It must be treated as clip 0.
+        let boundaryPosition = clipZeroEnd
+        #expect(PointAudioSyncMapper.belongsToFirstClip(spokenPosition: boundaryPosition, firstClipEndOffset: clipZeroEnd) == true)
+        // Re-based into clip 0's coordinate it is position 18 (clamped by the anchor to the
+        // last word), NOT some position inside clip 1.
+        let clipZeroPosition = PointAudioSyncMapper.positionInClip(spokenPosition: boundaryPosition, clipStartOffset: clipZeroStart)
+        #expect(clipZeroPosition == 18)
+
+        // The naming word before the tag is "panel" — resolved in clip 0's alignment, proving
+        // the boundary point reads clip 0's timeline, not clip 1's.
+        let clipZeroAlignment = alignment(for: clipZeroText)
+        let wordStart = PointAudioSyncMapper.indexOfWordStartBefore(positionInClip: clipZeroPosition, characters: clipZeroAlignment.characters)
+        // "panel" starts at index 13 in "open the run panel".
+        #expect(wordStart == 13)
+
+        // A position genuinely inside clip 1 belongs to clip 1 and re-bases to its own zero.
+        let clipOnePosition = PointAudioSyncMapper.positionInClip(spokenPosition: clipOneStart + 5, clipStartOffset: clipOneStart)
+        #expect(PointAudioSyncMapper.belongsToFirstClip(spokenPosition: clipOneStart + 5, firstClipEndOffset: clipZeroEnd) == false)
+        #expect(clipOnePosition == 5)
     }
 
-    /// Two points at the SAME clip-relative position but in different clips resolve to the
-    /// same within-clip time, proving the re-base — a global-timeline bug would give clip 1
-    /// a much larger time.
-    @Test func rebasedClipTwoPointResolvesToClipTwoLocalTimeNotGlobalTime() throws {
-        let firstClipTextLength = 30
-        // Clip 1's text is "open the run panel" — "run" starts at local index 9.
-        let clipOneAlignment = alignment(for: "open the run panel")
+    /// TRAP 2: a clip-1 point resolves against clip 1's OWN zero. Re-basing by the located
+    /// clip-1 start (a global-timeline bug would index far past the clip).
+    @Test func clipOnePointResolvesToClipOneLocalTimeNotGlobalTime() throws {
+        let spokenText = "go left. open the run panel"
+        let clipOneText = "open the run panel"
+        let clipOneStart = try #require(PointAudioSyncMapper.clipStartOffset(of: clipOneText, in: spokenText, from: 8)) // 9
+        let clipOneAlignment = alignment(for: clipOneText)
 
-        // Global position 39 → clip 1 local 9 (39 - 30). A POINT tag right after "run" would
-        // sit a couple chars later; use the tag position 12 (just after "run ").
-        let assignment = PointAudioSyncMapper.clipAssignment(spokenPosition: 30 + 12, firstClipTextLength: firstClipTextLength)
-        #expect(assignment.clipOrdinal == 1)
-        #expect(assignment.positionInClip == 12)
+        // A tag right after "run" in clip 1 sits at global position clipOneStart + 12.
+        let positionInClip = PointAudioSyncMapper.positionInClip(spokenPosition: clipOneStart + 12, clipStartOffset: clipOneStart)
+        #expect(positionInClip == 12)
 
         let fireTime = try #require(PointAudioSyncMapper.fireTimeSeconds(
             alignment: clipOneAlignment,
-            positionInClip: assignment.positionInClip,
+            positionInClip: positionInClip,
             strategy: .startOfWordBeforeTag,
             leadSeconds: 0.0
         ))
-        // "run" starts at clip-1-local index 9 → 0.9s in clip 1's OWN timeline. If the code
-        // had used the global position 42, it would index way past the clip (clamped) and
-        // report a very different time.
+        // "run" starts at clip-1-local index 9 → 0.9s in clip 1's OWN timeline. A global
+        // -timeline bug (position 21) would index near/after the clip end and give ~1.7s+.
         #expect(abs(fireTime - 0.9) < 0.0001)
+    }
+
+    // MARK: - Timed-vs-untimed eligibility (BLOCKER 1 & 4)
+
+    /// BLOCKER 1: a genuinely-timed response (ElevenLabs, clip 0 returned non-empty
+    /// alignment) MUST use timed sync. This is the decision `resolveAudioSyncEligibility`
+    /// makes AFTER finish, so a one-sentence reply (whose only clip is reported at finish)
+    /// is no longer wrongly dropped to the fixed dwell.
+    @Test func oneSentenceElevenLabsResponseWithAlignmentUsesTimedSync() {
+        let clipZeroAlignment = alignment(for: "click the run button")
+        #expect(PointAudioSyncMapper.shouldUseTimedPointing(
+            providerIsElevenLabs: true,
+            firstClipAlignment: clipZeroAlignment
+        ) == true)
+    }
+
+    /// BLOCKER 4: the untimed multi-point walk runs ONLY when per-word timing is truly
+    /// unavailable — Apple TTS (never ElevenLabs), or ElevenLabs that produced no alignment.
+    /// Never as a mask over an available-but-mis-decided timed path.
+    @Test func untimedWalkOnlyWhenTimingTrulyUnavailable() {
+        let realAlignment = alignment(for: "click the run button")
+        // Apple TTS → untimed, regardless of any alignment.
+        #expect(PointAudioSyncMapper.shouldUseTimedPointing(providerIsElevenLabs: false, firstClipAlignment: realAlignment) == false)
+        // ElevenLabs but clip 0 produced no alignment → untimed.
+        #expect(PointAudioSyncMapper.shouldUseTimedPointing(providerIsElevenLabs: true, firstClipAlignment: nil) == false)
+        let emptyAlignment = SpeechClipAlignment(characters: [], characterStartTimesSeconds: [], characterEndTimesSeconds: [])
+        #expect(PointAudioSyncMapper.shouldUseTimedPointing(providerIsElevenLabs: true, firstClipAlignment: emptyAlignment) == false)
     }
 
     // MARK: - Graceful degradation (no alignment -> untimed sequence)
@@ -220,6 +276,38 @@ struct PointAudioSyncTests {
         ])
         // Nothing turned audio-sync on, so the walk stays untimed (fixed dwell).
         #expect(manager.pointingAdvanceIsAudioSynced == false)
+    }
+
+    /// BLOCKER 3: when an ElevenLabs-intended clip fails and falls back to Apple, the speaker
+    /// STILL emits a clip report (with no alignment). Without it, the manager's scheduler
+    /// would wait ~12s for a report that never comes and strand the cursor. Here the
+    /// ElevenLabs client has no key, so clip 0 throws `missingAPIKey` and falls back to Apple
+    /// — and we assert a report is emitted PROMPTLY with nil alignment.
+    @MainActor
+    @Test func clipFallingBackToAppleStillReportsSoTheCursorNeverHangs() async {
+        let collector = ClipReportCollector()
+        let fakeApple = FakeNoTimingTTSClient()
+        let speaker = StreamingResponseSpeaker(
+            provider: .elevenLabs,
+            appleTTSClient: fakeApple,
+            elevenLabsTTSClient: ElevenLabsTTSClient(),
+            // No key → ElevenLabs throws missingAPIKey → the clip falls back to Apple.
+            elevenLabsAPIKeyProvider: { nil },
+            elevenLabsVoiceID: "voice",
+            onPlaybackStarted: {},
+            onClipSpoken: { [collector] report in collector.record(report) }
+        )
+
+        speaker.enqueueSentence("click the run button.")
+        speaker.finish(finalRemainder: nil, fullSpokenText: "click the run button.")
+        await speaker.awaitAllPlaybackFinished()
+
+        // A report WAS emitted (the anti-hang guarantee) even though the clip fell back...
+        #expect(collector.reports.count >= 1)
+        // ...and it carries NO alignment, so the scheduler degrades to the untimed walk.
+        #expect(collector.reports.first?.timing.alignment == nil)
+        // The chunk really was spoken through Apple.
+        #expect(fakeApple.spokenTexts.contains("click the run button."))
     }
 
     // MARK: - Tunables live in one place

@@ -203,23 +203,70 @@ enum PointAudioSyncTuning {
 /// its cursor advance should fire. No AVFoundation, no network — every function here is
 /// unit-tested. The async polling that WAITS for those times lives in `CompanionManager`.
 enum PointAudioSyncMapper {
-    /// Assigns a position in the full spoken (tag-stripped) text to one of the speaker's
-    /// clips and re-bases it into that clip's own text.
+    /// The character offset at which `clipText` begins within `spokenText`, searching forward
+    /// from `searchStartOffset`. Returns nil if it isn't found.
     ///
-    /// `StreamingResponseSpeaker` speaks clip 0 = the first sentence, clip 1 = the batched
-    /// remainder. `firstClipTextLength` is the character length of clip 0. A position below
-    /// it belongs to clip 0 (position unchanged); a position at/above it belongs to clip 1,
-    /// re-based to clip 1's own zero — TRAP 2: clip 1's alignment times start at 0, so its
-    /// positions must be measured from the start of clip 1's text, not the global text.
-    static func clipAssignment(
-        spokenPosition: Int,
-        firstClipTextLength: Int
-    ) -> (clipOrdinal: Int, positionInClip: Int) {
-        if spokenPosition < firstClipTextLength {
-            return (0, max(0, spokenPosition))
+    /// BLOCKER 2 (coordinate consistency): a POINT's `spokenPosition` is measured in the
+    /// SPOKEN text's coordinate space (the tag-stripped, leading-trimmed response). To map it
+    /// onto a clip we must place the clip in that SAME space — not compare it against a
+    /// separately-trimmed clip length. Locating `clipText` inside `spokenText` puts the clip
+    /// boundary and the point positions on one ruler, INCLUDING the inter-clip separator
+    /// whitespace that lives between them. `StreamingResponseSpeaker` derives each clip from
+    /// this same text, so the substring is present in the common case; the caller falls back
+    /// to a running cursor when a whitespace-normalization difference makes it absent.
+    static func clipStartOffset(of clipText: String, in spokenText: String, from searchStartOffset: Int) -> Int? {
+        let trimmedClipText = clipText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedClipText.isEmpty else { return nil }
+        let spokenCharacters = Array(spokenText)
+        let clipCharacters = Array(trimmedClipText)
+        guard spokenCharacters.count >= clipCharacters.count else { return nil }
+        let firstSearchIndex = max(0, min(searchStartOffset, spokenCharacters.count - clipCharacters.count))
+        var startIndex = firstSearchIndex
+        while startIndex <= spokenCharacters.count - clipCharacters.count {
+            var matches = true
+            for offset in clipCharacters.indices where spokenCharacters[startIndex + offset] != clipCharacters[offset] {
+                matches = false
+                break
+            }
+            if matches { return startIndex }
+            startIndex += 1
         }
-        // Re-base into clip 1's own text coordinate space.
-        return (1, max(0, spokenPosition - firstClipTextLength))
+        return nil
+    }
+
+    /// Whether a spoken position is named within (or immediately after) the FIRST clip rather
+    /// than a later one.
+    ///
+    /// BLOCKER 2 (boundary): the model places a [POINT] tag right after the naming WORD, so a
+    /// tag following clip 0's last word/punctuation — which lands at clip 0's end or in the
+    /// separator whitespace before clip 1 — is still anchored to clip 0 and MUST map to clip
+    /// 0's alignment/playhead. We therefore treat positions at/before `firstClipEndOffset`
+    /// (inclusive) as clip 0, not clip 1.
+    static func belongsToFirstClip(spokenPosition: Int, firstClipEndOffset: Int) -> Bool {
+        spokenPosition <= firstClipEndOffset
+    }
+
+    /// Whether a turn should drive TIMED pointing rather than the untimed fixed-dwell walk.
+    ///
+    /// BLOCKER 1 & 4: timed pointing is used ONLY when ElevenLabs is the resolved provider
+    /// AND clip 0 actually came back with non-empty alignment (per-word timing is really
+    /// flowing). Everything else — Apple TTS, or ElevenLabs that produced no/empty alignment
+    /// (a failure or fallback) — means timing is truly unavailable, so the untimed walk runs.
+    /// The untimed walk is never a silent mask over an available-but-mis-decided timed path.
+    static func shouldUseTimedPointing(providerIsElevenLabs: Bool, firstClipAlignment: SpeechClipAlignment?) -> Bool {
+        guard providerIsElevenLabs else { return false }
+        guard let firstClipAlignment, !firstClipAlignment.isEmpty else { return false }
+        return true
+    }
+
+    /// Re-bases a spoken position into a clip's OWN text coordinate: the position minus the
+    /// clip's start offset, clamped to >= 0.
+    ///
+    /// TRAP 2 (per-clip zero): each clip's alignment times begin at that clip's own 0, so a
+    /// point in clip 1 must be measured from the start of clip 1's text — never from the
+    /// global spoken text — or its time would be read from the wrong place in the array.
+    static func positionInClip(spokenPosition: Int, clipStartOffset: Int) -> Int {
+        max(0, spokenPosition - clipStartOffset)
     }
 
     /// The clip-relative audio time (seconds) at which to fire the advance for a point
