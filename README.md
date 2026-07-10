@@ -4,9 +4,9 @@
 
 <h1 align="center">Clawdy</h1>
 
-Clawdy is a free, fully-local Mac menu bar buddy that lives next to your cursor. It can see your screen, talk to you, and point at stuff — like a teacher sitting next to you.
+Clawdy unleashes Claude Code, Codex, and other CLI AI harnesses **from the terminal onto your whole desktop** — turning the coding agent you already use into a cursor assistant that can see what you see and talk with you out loud.
 
-The twist: **Clawdy runs entirely on your own Claude Code or Codex CLI subscription.** There's no Cloudflare Worker, no model API keys, no metering, and nothing sensitive in the app. When you talk to Clawdy, it shells out to the `claude` or `codex` CLI already installed and signed in on your machine, so responses are billed to *your* existing subscription.
+It's not a reimplementation: Clawdy **builds on top of and shells out to** the `claude` or `codex` CLI already installed and signed in on your machine, so it can do everything those harnesses can — billed to *your* existing subscription, with no model API keys, no proxy, and nothing sensitive in the app. And because it drives the same underlying session, you can **hand a conversation off and resume it right back in the CLI** whenever you want the terminal again.
 
 Voice is local by default: speech-to-text uses Apple's on-device Speech framework, and text-to-speech uses the built-in `AVSpeechSynthesizer` — no API key, nothing leaves your Mac except the CLI's own model call. Optionally, bring your own **ElevenLabs API key** for higher-quality voice and audio-synced cursor pointing; if it isn't set (or a request fails), Clawdy falls back to Apple's built-in TTS automatically.
 
