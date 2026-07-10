@@ -350,6 +350,9 @@ struct CompanionPanelView: View {
                         .textFieldStyle(.plain)
                         .font(DS.Font.detailBodyRegular)
                         .foregroundColor(DS.Colors.textPrimary)
+                        // The visible placeholder is a custom overlay, so the empty TextField
+                        // title leaves no programmatic label — restore it for VoiceOver.
+                        .accessibilityLabel("Enter your email")
                         // Draw the placeholder ourselves: the native macOS placeholder renders in a
                         // system dark tone that is invisible on this dark surface, so overlay it in a
                         // muted-but-legible secondary token when the field is empty.
@@ -1013,6 +1016,9 @@ struct CompanionPanelView: View {
                         .textFieldStyle(.plain)
                         .font(DS.Font.overlayCaptionRegular)
                         .foregroundColor(DS.Colors.textPrimary)
+                        // The visible placeholder is a custom overlay, so the empty TextField
+                        // title leaves no programmatic label — restore it for VoiceOver.
+                        .accessibilityLabel("Voice ID")
                         // Draw the placeholder ourselves: the native macOS placeholder renders in a
                         // system dark tone that is invisible on this dark surface, so overlay it in a
                         // muted-but-legible secondary token when the field is empty.

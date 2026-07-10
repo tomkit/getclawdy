@@ -153,6 +153,9 @@ private struct ResearchClarificationView: View {
                 .textFieldStyle(.plain)
                 .font(DS.Font.detailBodyRegular)
                 .foregroundColor(DS.Colors.textPrimary)
+                // The visible placeholder is a custom overlay, so the empty TextField title
+                // leaves no programmatic label — restore it for VoiceOver.
+                .accessibilityLabel("Your answer")
                 .lineLimit(1...4)
                 // Draw the placeholder ourselves: the native macOS placeholder renders in a
                 // system dark tone that is invisible on this dark surface, so overlay it in a
