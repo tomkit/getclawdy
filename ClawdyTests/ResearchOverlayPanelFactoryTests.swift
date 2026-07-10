@@ -29,6 +29,13 @@ struct ResearchOverlayPanelFactoryTests {
     /// Every panel the factory produces — regardless of type/shadow/stationary — shares
     /// these flags. Asserting them once per case proves the parameters only change the
     /// three intended dimensions and nothing else drifted.
+    ///
+    /// `sharingType` is NO LONGER an absolute `.none`: it now follows the "Show Clawdy
+    /// in screen recordings" (Recording Mode) setting the factory reads at
+    /// construction. So we compute the expected value from the CURRENT default (which
+    /// each caller sets deterministically) — `.none` when off, `.readOnly` when on —
+    /// and assert against that. The dedicated `overlayPanelSharingTypeFollowsRecordingMode`
+    /// test pins the mapping in both modes explicitly.
     private func assertSharedInvariants(_ panel: NSPanel) {
         #expect(panel.styleMask.contains(.borderless))
         #expect(panel.styleMask.contains(.nonactivatingPanel))
@@ -40,8 +47,27 @@ struct ResearchOverlayPanelFactoryTests {
         #expect(panel.isExcludedFromWindowsMenu == true)
         #expect(panel.collectionBehavior.contains(.canJoinAllSpaces))
         #expect(panel.collectionBehavior.contains(.fullScreenAuxiliary))
-        // Never leak overlay chrome into a screenshot.
-        #expect(panel.sharingType == NSWindow.SharingType.none)
+        // Recording-Mode-aware: matches the setting the factory read at construction.
+        let expectedSharingType = RecordingMode.overlaySharingType(
+            recordingEnabled: UserDefaults.standard.bool(forKey: .recordingModeEnabled)
+        )
+        #expect(panel.sharingType == expectedSharingType)
+    }
+
+    /// Runs `body` with the Recording Mode default forced to `enabled`, restoring the
+    /// prior value afterwards so the shared standard domain is never left mutated.
+    private func withRecordingMode(_ enabled: Bool, _ body: () -> Void) {
+        let key = DefaultsKey.recordingModeEnabled
+        let original = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(enabled, forKey: key)
+        defer {
+            if let original {
+                UserDefaults.standard.set(original, forKey: key.rawValue)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        body()
     }
 
     /// DEFAULT (the 5 existing toast/control callers): a plain `NSPanel`, NO shadow,
@@ -84,6 +110,28 @@ struct ResearchOverlayPanelFactoryTests {
         #expect(panel.canBecomeKey == true)
         #expect(panel.hasShadow == true)
         #expect(panel.collectionBehavior.contains(.stationary) == false)
+    }
+
+    /// MODE-AWARE sharingType: the factory reads the Recording Mode setting at
+    /// construction, so a panel built while it's OFF is `.none` (hidden from external
+    /// recorders — the default) and one built while it's ON is `.readOnly` (visible to
+    /// recorders for demos). Neither ever affects Clawdy's OWN model screenshots.
+    @Test func overlayPanelSharingTypeFollowsRecordingMode() {
+        withRecordingMode(false) {
+            let offPanel = ResearchToastPanel.makeOverlayPanel(size: size)
+            #expect(offPanel.sharingType == NSWindow.SharingType.none,
+                    "Recording Mode OFF → research overlay panels are hidden from external recorders (.none)")
+        }
+        withRecordingMode(true) {
+            let onPanel = ResearchToastPanel.makeOverlayPanel(size: size)
+            #expect(onPanel.sharingType == .readOnly,
+                    "Recording Mode ON → research overlay panels are visible to external recorders (.readOnly)")
+        }
+        // Toggling back off fully reverts for newly-built panels.
+        withRecordingMode(false) {
+            let revertedPanel = ResearchToastPanel.makeOverlayPanel(size: size)
+            #expect(revertedPanel.sharingType == NSWindow.SharingType.none)
+        }
     }
 
     /// The live detail panel the stacked overlay actually builds must be a

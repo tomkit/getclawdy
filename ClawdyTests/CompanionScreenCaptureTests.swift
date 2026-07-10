@@ -282,6 +282,153 @@ struct CompanionScreenCaptureTests {
         #expect(shouldReinclude == false)
     }
 
+    // MARK: - cachedShareableContentSatisfiesOwnWindowNeeds (fresh-vs-cached enumeration)
+    //
+    // The model-capture filter is built from a REUSED SCShareableContent cache (to
+    // avoid re-triggering the Sequoia prompt). But that cache can build a WRONG
+    // filter when it predates Clawdy's own overlay/results windows. These pin the
+    // pure decision for when the cache is safe vs when a FRESH enumeration is
+    // required — i.e. when a `.readOnly` overlay would otherwise leak (BLOCKING 1)
+    // or a just-opened results window would otherwise be excluded (BLOCKING 2).
+
+    /// Recording Mode OFF and no results window registered → all overlays are `.none`
+    /// (excluded by ScreenCaptureKit inherently) and nothing needs re-inclusion, so
+    /// ANY cache is safe to reuse — even one that doesn't contain our app.
+    @Test func cacheReusedWhenRecordingOffAndNoResultsRegistered() {
+        let satisfies = CompanionScreenCaptureUtility.cachedShareableContentSatisfiesOwnWindowNeeds(
+            recordingModeEnabled: false,
+            registeredCapturableWindowNumbers: [],
+            cachedContentContainsOwnApplication: false,
+            cachedWindowNumbers: []
+        )
+        #expect(satisfies == true)
+    }
+
+    /// BLOCKING 1 — Recording Mode ON but the cache was enumerated when Clawdy had no
+    /// shareable window (own app absent). App-level exclusion couldn't resolve our
+    /// app, so a `.readOnly` overlay would LEAK. The cache is NOT safe → refresh.
+    @Test func freshEnumerationRequiredWhenRecordingOnAndCacheLacksOwnApp() {
+        let satisfies = CompanionScreenCaptureUtility.cachedShareableContentSatisfiesOwnWindowNeeds(
+            recordingModeEnabled: true,
+            registeredCapturableWindowNumbers: [],
+            cachedContentContainsOwnApplication: false,
+            cachedWindowNumbers: []
+        )
+        #expect(satisfies == false)
+    }
+
+    /// Recording Mode ON with the cache already containing our app → app-exclusion can
+    /// resolve and exclude every Clawdy overlay, so the cache is safe to reuse (no
+    /// re-prompt on subsequent captures once the app is present).
+    @Test func cacheReusedWhenRecordingOnAndCacheHasOwnApp() {
+        let satisfies = CompanionScreenCaptureUtility.cachedShareableContentSatisfiesOwnWindowNeeds(
+            recordingModeEnabled: true,
+            registeredCapturableWindowNumbers: [],
+            cachedContentContainsOwnApplication: true,
+            cachedWindowNumbers: []
+        )
+        #expect(satisfies == true)
+    }
+
+    /// BLOCKING 2 — a results window (7) is registered as capturable but the cache
+    /// (enumerated before it opened) has no SCWindow for it. `exceptingWindows`
+    /// couldn't re-include it, so it would be excluded from the MODEL capture. Even
+    /// with Recording Mode off, the cache is NOT safe → refresh.
+    @Test func freshEnumerationRequiredWhenResultsWindowMissingFromCache() {
+        let satisfies = CompanionScreenCaptureUtility.cachedShareableContentSatisfiesOwnWindowNeeds(
+            recordingModeEnabled: false,
+            registeredCapturableWindowNumbers: [7],
+            cachedContentContainsOwnApplication: true,
+            cachedWindowNumbers: [] // results window 7 not yet enumerated
+        )
+        #expect(satisfies == false)
+    }
+
+    /// A registered results window (7) that IS present in the cache (along with our
+    /// app) can be re-included → the cache is safe to reuse.
+    @Test func cacheReusedWhenResultsWindowPresentInCache() {
+        let satisfies = CompanionScreenCaptureUtility.cachedShareableContentSatisfiesOwnWindowNeeds(
+            recordingModeEnabled: false,
+            registeredCapturableWindowNumbers: [7],
+            cachedContentContainsOwnApplication: true,
+            cachedWindowNumbers: [7, 42]
+        )
+        #expect(satisfies == true)
+    }
+
+    /// If ANY registered results window is missing from the cache, refresh — the
+    /// subset check must cover every registered number, not just one.
+    @Test func freshEnumerationRequiredWhenAnyRegisteredResultsWindowMissing() {
+        let satisfies = CompanionScreenCaptureUtility.cachedShareableContentSatisfiesOwnWindowNeeds(
+            recordingModeEnabled: true,
+            registeredCapturableWindowNumbers: [7, 8],
+            cachedContentContainsOwnApplication: true,
+            cachedWindowNumbers: [7] // 8 missing
+        )
+        #expect(satisfies == false)
+    }
+
+    /// A registered results window with the app also present, under Recording Mode
+    /// ON, is fully satisfiable → reuse.
+    @Test func cacheReusedWhenRecordingOnAndResultsWindowPresent() {
+        let satisfies = CompanionScreenCaptureUtility.cachedShareableContentSatisfiesOwnWindowNeeds(
+            recordingModeEnabled: true,
+            registeredCapturableWindowNumbers: [7],
+            cachedContentContainsOwnApplication: true,
+            cachedWindowNumbers: [7]
+        )
+        #expect(satisfies == true)
+    }
+
+    // MARK: - Model-capture filter-input derivation (app-excluded + results re-included)
+
+    /// The full filter-input derivation over an enumerated window list: given Clawdy's
+    /// own chrome window, the registered results window, and another app's window, the
+    /// `exceptingWindows` set (from `shouldReincludeOwnAppWindowInCapture`) must be
+    /// EXACTLY the results window — our chrome stays excluded by the app-level
+    /// exclusion, and the other app's window is captured without needing an exception.
+    /// This is the pure stand-in for the (un-unit-testable) live SCK filter build.
+    @Test func filterInputReincludesOnlyRegisteredResultsWindowAmongEnumeratedWindows() {
+        // (owningBundleID, windowNumber) — simulates an SCShareableContent.windows list.
+        let enumeratedWindows: [(String?, CGWindowID)] = [
+            (ownBundle, 100),           // our transient chrome (overlay/pill) — must stay excluded
+            (ownBundle, 200),           // our results window — registered, must be re-included
+            ("com.apple.Safari", 300),  // another app's window — captured, no exception needed
+            (nil, 400),                 // unknown owner — never ours
+        ]
+        let registeredCapturableWindowNumbers: Set<CGWindowID> = [200]
+
+        let exceptingWindowNumbers = Set(
+            enumeratedWindows
+                .filter { owningBundleID, windowNumber in
+                    CompanionScreenCaptureUtility.shouldReincludeOwnAppWindowInCapture(
+                        windowOwningBundleIdentifier: owningBundleID,
+                        windowNumber: windowNumber,
+                        ownAppBundleIdentifier: ownBundle,
+                        capturableOwnWindowNumbers: registeredCapturableWindowNumbers
+                    )
+                }
+                .map { _, windowNumber in windowNumber }
+        )
+
+        // Only the registered results window (200) is re-included.
+        #expect(exceptingWindowNumbers == [200])
+        // Our chrome (100) is NOT re-included → it stays excluded by app-exclusion.
+        #expect(exceptingWindowNumbers.contains(100) == false)
+        // Another app's window (300) is never part of our own re-inclusion set.
+        #expect(exceptingWindowNumbers.contains(300) == false)
+
+        // And the enumeration contains our app (so app-level exclusion can resolve it),
+        // which is the precondition the cache-sufficiency check enforces.
+        let ownAppIsPresent = enumeratedWindows.contains { owningBundleID, _ in
+            CompanionScreenCaptureUtility.windowBelongsToOwnApp(
+                windowOwningBundleIdentifier: owningBundleID,
+                ownAppBundleIdentifier: ownBundle
+            )
+        }
+        #expect(ownAppIsPresent == true)
+    }
+
     // MARK: - capturable-set thread safety
 
     /// The capturable set is MUTATED on the main actor (register/unregister as the

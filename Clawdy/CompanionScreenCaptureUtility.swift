@@ -121,15 +121,6 @@ enum CompanionScreenCaptureUtility {
     /// whether the user's cursor is on that screen. This gives the AI
     /// full context across multiple monitors.
     static func captureAllScreensAsJPEG() async throws -> [CompanionScreenCapture] {
-        let content = try await shareableContentReusingCacheWhenDisplaysUnchanged()
-
-        guard !content.displays.isEmpty else {
-            throw NSError(domain: "CompanionScreenCapture", code: -1,
-                          userInfo: [NSLocalizedDescriptionKey: "No display available for capture"])
-        }
-
-        let mouseLocation = NSEvent.mouseLocation
-
         // Exclude the app's own windows (overlays, pills, panels) so the AI sees
         // only the user's content — EXCEPT the research results window, which the
         // user explicitly opened and wants Clawdy to see. That window is exempted
@@ -147,6 +138,31 @@ enum CompanionScreenCaptureUtility {
         // Read ONE atomic snapshot of the capturable set for the whole capture, so a
         // concurrent register/unregister on the main actor can't tear this read.
         let capturableWindowsForThisCapture = capturableWindowsSnapshot()
+        // Whether Recording Mode is ON — when it is, Clawdy's overlays are `.readOnly`
+        // and are NOT inherently excluded by ScreenCaptureKit, so the model-capture
+        // filter must actively app-exclude them (which needs our app + windows to be
+        // present in the enumeration; see `shareableContentForCapture`).
+        let recordingModeEnabled = UserDefaults.standard.bool(forKey: .recordingModeEnabled)
+
+        // Enumerate shareable content, refreshing past the display-unchanged reuse
+        // cache when the cache can't satisfy the current own-window exclusion needs
+        // (Recording Mode on, or a results window registered) — otherwise a stale
+        // snapshot would (a) omit our app so app-exclusion excludes nothing and a
+        // `.readOnly` overlay leaks, or (b) omit a just-opened results window so it
+        // gets excluded from the model capture. See the function for the full rule.
+        let content = try await shareableContentForCapture(
+            ownBundleIdentifier: ownBundleIdentifier,
+            recordingModeEnabled: recordingModeEnabled,
+            registeredCapturableWindowNumbers: capturableWindowsForThisCapture
+        )
+
+        guard !content.displays.isEmpty else {
+            throw NSError(domain: "CompanionScreenCapture", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "No display available for capture"])
+        }
+
+        let mouseLocation = NSEvent.mouseLocation
+
         let clawdyApplication = content.applications.first { application in
             windowBelongsToOwnApp(
                 windowOwningBundleIdentifier: application.bundleIdentifier,
@@ -202,8 +218,16 @@ enum CompanionScreenCaptureUtility {
             let isCursorScreen = displayFrame.contains(mouseLocation)
 
             // Application-level exclusion of ALL Clawdy windows, re-including only
-            // the user-opened results window(s). If our own application isn't in
-            // the enumeration there is nothing of ours to leak, so exclude nothing.
+            // the user-opened results window(s).
+            //
+            // `clawdyApplication` is nil ONLY when the (needs-aware, freshly
+            // re-enumerated when Recording Mode is on) `content.applications` has no
+            // Clawdy entry — which means Clawdy genuinely has NO shareable window on
+            // screen right now, so there is nothing of ours that could leak and
+            // excluding no application is safe. (If a `.readOnly` overlay existed,
+            // the needs-aware enumeration above would have refreshed and our app
+            // would be present.) We keep this branch defensive rather than force-
+            // unwrapping so a transient race can never crash the capture.
             let filter: SCContentFilter
             if let clawdyApplication {
                 filter = SCContentFilter(
@@ -267,17 +291,49 @@ enum CompanionScreenCaptureUtility {
         return capturedScreens
     }
 
-    /// Returns shareable content, reusing the cached snapshot when the set of
-    /// connected displays is unchanged. Re-enumerating SCShareableContent is what
-    /// re-triggers the macOS Sequoia screen-recording prompt, so we only do it
-    /// when we have no cache or the display configuration has actually changed.
-    private static func shareableContentReusingCacheWhenDisplaysUnchanged() async throws -> SCShareableContent {
+    /// Returns shareable content for building the model-capture filter, reusing the
+    /// cached snapshot when it is safe to do so and re-enumerating fresh otherwise.
+    ///
+    /// Re-enumerating SCShareableContent is what re-triggers the macOS Sequoia
+    /// screen-recording prompt (even once granted, per the file header), so the
+    /// default is to reuse the cache. We ONLY re-enumerate when either:
+    ///   - the display configuration changed (stale geometry — the original
+    ///     reason), OR
+    ///   - the cache can't satisfy the current own-window exclusion needs
+    ///     (`cachedShareableContentSatisfiesOwnWindowNeeds` is false): Recording
+    ///     Mode is on (overlays are `.readOnly` and must be actively app-excluded,
+    ///     which requires our app to be present in the enumeration) or a results
+    ///     window is registered (its `SCWindow` must be present so `exceptingWindows`
+    ///     can re-include it) AND the cache lacks those.
+    ///
+    /// In the common state (Recording Mode off, no results window) every Clawdy
+    /// overlay is `sharingType = .none` and is excluded by ScreenCaptureKit
+    /// inherently, so the cache is always reused there — no new prompts. A refresh
+    /// happens only on the opt-in transitions (Recording Mode toggled on, results
+    /// window opened) and, once the fresh snapshot contains our app + those windows,
+    /// subsequent captures reuse it again until displays change or a new results
+    /// window appears — so a refresh is at most one prompt per transition, not per
+    /// capture.
+    private static func shareableContentForCapture(
+        ownBundleIdentifier: String?,
+        recordingModeEnabled: Bool,
+        registeredCapturableWindowNumbers: Set<CGWindowID>
+    ) async throws -> SCShareableContent {
         let currentDisplayGeometry = currentDisplayGeometry()
 
         if let cachedShareableContent,
            !shouldRefreshShareableContent(
                cachedDisplayGeometry: cachedShareableContentDisplayGeometry,
                currentDisplayGeometry: currentDisplayGeometry
+           ),
+           cachedShareableContentSatisfiesOwnWindowNeeds(
+               recordingModeEnabled: recordingModeEnabled,
+               registeredCapturableWindowNumbers: registeredCapturableWindowNumbers,
+               cachedContentContainsOwnApplication: shareableContentContainsOwnApplication(
+                   cachedShareableContent,
+                   ownAppBundleIdentifier: ownBundleIdentifier
+               ),
+               cachedWindowNumbers: windowNumbers(in: cachedShareableContent)
            ) {
             return cachedShareableContent
         }
@@ -288,6 +344,27 @@ enum CompanionScreenCaptureUtility {
         // against, so both sides of the cache check live in one coordinate space.
         cachedShareableContentDisplayGeometry = currentDisplayGeometry
         return freshContent
+    }
+
+    /// Whether the given shareable content contains at least one window owned by
+    /// THIS app (so `content.applications` includes Clawdy and app-level exclusion
+    /// can resolve it).
+    private static func shareableContentContainsOwnApplication(
+        _ content: SCShareableContent,
+        ownAppBundleIdentifier: String?
+    ) -> Bool {
+        content.applications.contains { application in
+            windowBelongsToOwnApp(
+                windowOwningBundleIdentifier: application.bundleIdentifier,
+                ownAppBundleIdentifier: ownAppBundleIdentifier
+            )
+        }
+    }
+
+    /// The set of window numbers present in the given shareable content — used to
+    /// check whether every registered capturable (results) window is enumerated.
+    private static func windowNumbers(in content: SCShareableContent) -> Set<CGWindowID> {
+        Set(content.windows.map { $0.windowID })
     }
 
     /// The identity + geometry of all currently-connected displays, read cheaply
@@ -354,6 +431,46 @@ enum CompanionScreenCaptureUtility {
         }
         // Our own window — re-include it only if it's the exempted results window.
         return capturableOwnWindowNumbers.contains(windowNumber)
+    }
+
+    /// Whether the reused SCShareableContent cache is safe to build the
+    /// model-capture filter from, given the current own-window exclusion needs.
+    ///
+    /// The cache is a point-in-time enumeration that may predate Clawdy's own
+    /// overlay / results windows, so reusing it can build a WRONG filter:
+    ///   - Recording Mode ON: overlays are `.readOnly`, so they are NOT excluded by
+    ///     ScreenCaptureKit on their own — the filter must app-exclude Clawdy, which
+    ///     only works if `content.applications` contains Clawdy. A cache enumerated
+    ///     when Clawdy had no shareable window omits our app → app-exclusion excludes
+    ///     nothing → a later `.readOnly` overlay LEAKS into the model screenshot.
+    ///   - A results window is registered: it must be re-included via
+    ///     `exceptingWindows`, which needs its `SCWindow` present in the cache. A
+    ///     results window opened after enumeration is absent → app-exclusion removes
+    ///     it from the model capture (regressing "speak a follow-up over the open
+    ///     results page", which needs the model to SEE that page).
+    ///
+    /// So the cache is safe ONLY when:
+    ///   - Recording Mode is OFF and no results window is registered — every Clawdy
+    ///     overlay is `.none` (inherently excluded) and there is nothing to
+    ///     re-include, so ANY snapshot works; OR
+    ///   - the cache already contains our application AND an SCWindow for every
+    ///     registered capturable window number.
+    /// Otherwise the caller must re-enumerate fresh.
+    nonisolated static func cachedShareableContentSatisfiesOwnWindowNeeds(
+        recordingModeEnabled: Bool,
+        registeredCapturableWindowNumbers: Set<CGWindowID>,
+        cachedContentContainsOwnApplication: Bool,
+        cachedWindowNumbers: Set<CGWindowID>
+    ) -> Bool {
+        // Nothing to protect against: overlays are `.none` (inherently excluded by
+        // ScreenCaptureKit) and no results window needs re-inclusion — reuse freely.
+        if !recordingModeEnabled && registeredCapturableWindowNumbers.isEmpty {
+            return true
+        }
+        // App-level exclusion can only resolve if the enumeration knows our app.
+        guard cachedContentContainsOwnApplication else { return false }
+        // Every registered results window must be present so we can re-include it.
+        return registeredCapturableWindowNumbers.isSubset(of: cachedWindowNumbers)
     }
 
     /// Decides whether the cached SCShareableContent snapshot must be discarded

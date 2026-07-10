@@ -29,6 +29,24 @@ struct WindowCapturabilityContractTests {
     /// A screen to build screen-scoped windows against; the CI host has at least one.
     private func anyScreen() -> NSScreen? { NSScreen.main ?? NSScreen.screens.first }
 
+    /// Runs `body` with the Recording Mode default forced to `enabled`, restoring the
+    /// prior value afterwards so the shared standard domain is never left mutated.
+    /// The overlay windows read this setting at construction, so the chrome tests set
+    /// it deterministically instead of depending on the ambient default.
+    private func withRecordingMode(_ enabled: Bool, _ body: () -> Void) {
+        let key = DefaultsKey.recordingModeEnabled
+        let original = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(enabled, forKey: key)
+        defer {
+            if let original {
+                UserDefaults.standard.set(original, forKey: key.rawValue)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        body()
+    }
+
     /// Writes a tiny self-contained report.html so the results-window controller has a
     /// real file:// URL to load.
     private func makeTemporaryReportHTML() throws -> URL {
@@ -77,34 +95,53 @@ struct WindowCapturabilityContractTests {
 
     // MARK: - Chrome must NOT be capturable
 
-    /// The full-screen cursor/response overlay window (`OverlayWindow`) is `.none` so the
-    /// blue cursor + response bubble never leak into a screenshot. Constructed directly
-    /// (its init sets the sharing type).
-    @Test func cursorOverlayWindowIsScreenshotExcluded() throws {
+    /// The full-screen cursor/response overlay window (`OverlayWindow`) is MODE-AWARE:
+    /// `.none` (never captured) when Recording Mode is OFF — the default that keeps the
+    /// blue cursor + response bubble out of screenshots — and `.readOnly` (visible to
+    /// external recorders) when it's ON for demos. Either way it never reaches Clawdy's
+    /// OWN model screenshots, which app-exclude Clawdy regardless of `sharingType`.
+    @Test func cursorOverlayWindowSharingTypeFollowsRecordingMode() throws {
         guard let screen = anyScreen() else {
             Issue.record("no screen available to build the cursor overlay window")
             return
         }
-        let overlayWindow = OverlayWindow(screen: screen)
-        #expect(overlayWindow.sharingType == .none,
-                "the full-screen cursor/response overlay must never be captured (.none)")
+        withRecordingMode(false) {
+            #expect(OverlayWindow(screen: screen).sharingType == .none,
+                    "Recording Mode OFF → the cursor/response overlay is hidden from recorders (.none)")
+        }
+        withRecordingMode(true) {
+            #expect(OverlayWindow(screen: screen).sharingType == .readOnly,
+                    "Recording Mode ON → the cursor/response overlay is visible to recorders (.readOnly)")
+        }
     }
 
     /// The transient research overlay chrome — the stacked pill panel AND its detail
-    /// panel — are `.none`. (Also covered by `ResearchOverlayTests`; re-pinned here so
-    /// the whole contract lives in one place.)
-    @Test func researchOverlayChromeIsScreenshotExcluded() {
-        let controller = ResearchStackedOverlayController.offscreenForTesting()
-        let pill = makeRunningPill(id: "chrome")
-        controller.render(pills: [pill], controlRow: nil, detailViewModel: pill.viewModel)
-        defer { controller.hide() }
-
+    /// panel — is MODE-AWARE: `.none` when Recording Mode is OFF (never captured, the
+    /// default) and `.readOnly` when it's ON. (Also covered by `ResearchOverlayTests`;
+    /// re-pinned here so the whole contract lives in one place.)
+    @Test func researchOverlayChromeSharingTypeFollowsRecordingMode() {
         // NB: spell the enum type out — a bare `.none` against an Optional `sharingType`
         // resolves to `Optional.none` (nil), not `NSWindow.SharingType.none`.
-        #expect(controller.toastPanelForTesting(id: "chrome")?.sharingType == NSWindow.SharingType.none,
-                "each research toast window must never be captured (.none)")
-        #expect(controller.detailPanelForTesting?.sharingType == NSWindow.SharingType.none,
-                "the research detail panel must never be captured (.none)")
+        withRecordingMode(false) {
+            let controller = ResearchStackedOverlayController.offscreenForTesting()
+            let pill = makeRunningPill(id: "chrome-off")
+            controller.render(pills: [pill], controlRow: nil, detailViewModel: pill.viewModel)
+            defer { controller.hide() }
+            #expect(controller.toastPanelForTesting(id: "chrome-off")?.sharingType == NSWindow.SharingType.none,
+                    "Recording Mode OFF → each research toast window is hidden from recorders (.none)")
+            #expect(controller.detailPanelForTesting?.sharingType == NSWindow.SharingType.none,
+                    "Recording Mode OFF → the research detail panel is hidden from recorders (.none)")
+        }
+        withRecordingMode(true) {
+            let controller = ResearchStackedOverlayController.offscreenForTesting()
+            let pill = makeRunningPill(id: "chrome-on")
+            controller.render(pills: [pill], controlRow: nil, detailViewModel: pill.viewModel)
+            defer { controller.hide() }
+            #expect(controller.toastPanelForTesting(id: "chrome-on")?.sharingType == .readOnly,
+                    "Recording Mode ON → each research toast window is visible to recorders (.readOnly)")
+            #expect(controller.detailPanelForTesting?.sharingType == .readOnly,
+                    "Recording Mode ON → the research detail panel is visible to recorders (.readOnly)")
+        }
     }
 
     // MARK: - Consolidated contract (documents the whole invariant in one place)
@@ -129,22 +166,27 @@ struct WindowCapturabilityContractTests {
         #expect(resultsController.windowForTesting?.sharingType == .readOnly,
                 "CONTRACT: the results window is CAPTURABLE (.readOnly)")
 
-        // NON-CAPTURABLE side: the transient research overlay chrome.
-        let overlayController = ResearchStackedOverlayController.offscreenForTesting()
-        let pill = makeRunningPill(id: "contract")
-        overlayController.render(pills: [pill], controlRow: nil, detailViewModel: pill.viewModel)
-        defer { overlayController.hide() }
-        #expect(overlayController.toastPanelForTesting(id: "contract")?.sharingType == NSWindow.SharingType.none,
-                "CONTRACT: each research toast window is chrome (.none)")
-        #expect(overlayController.detailPanelForTesting?.sharingType == NSWindow.SharingType.none,
-                "CONTRACT: the detail panel is chrome (.none)")
+        // NON-CAPTURABLE side (in the DEFAULT Recording-Mode-OFF state): the transient
+        // research overlay chrome and the cursor/response overlay are `.none`. Pinned
+        // to OFF explicitly so the contract is deterministic; the mode-aware
+        // `…FollowsRecordingMode` tests above cover the ON state.
+        withRecordingMode(false) {
+            let overlayController = ResearchStackedOverlayController.offscreenForTesting()
+            let pill = makeRunningPill(id: "contract")
+            overlayController.render(pills: [pill], controlRow: nil, detailViewModel: pill.viewModel)
+            defer { overlayController.hide() }
+            #expect(overlayController.toastPanelForTesting(id: "contract")?.sharingType == NSWindow.SharingType.none,
+                    "CONTRACT: each research toast window is chrome (.none) when Recording Mode is off")
+            #expect(overlayController.detailPanelForTesting?.sharingType == NSWindow.SharingType.none,
+                    "CONTRACT: the detail panel is chrome (.none) when Recording Mode is off")
 
-        // NON-CAPTURABLE side: the full-screen cursor/response overlay.
-        if let screen = anyScreen() {
-            #expect(OverlayWindow(screen: screen).sharingType == .none,
-                    "CONTRACT: the cursor/response overlay is chrome (.none)")
-        } else {
-            Issue.record("no screen available to build the cursor overlay window")
+            // NON-CAPTURABLE side: the full-screen cursor/response overlay.
+            if let screen = anyScreen() {
+                #expect(OverlayWindow(screen: screen).sharingType == .none,
+                        "CONTRACT: the cursor/response overlay is chrome (.none) when Recording Mode is off")
+            } else {
+                Issue.record("no screen available to build the cursor overlay window")
+            }
         }
     }
 
