@@ -738,11 +738,27 @@ struct BlueCursorView: View {
     /// sequence (or flies the buddy back to the cursor after the last target).
     ///
     /// The dwell is held in `pointingDwellWorkItem` so a new navigation can cancel
-    /// it cleanly. FORWARD-COMPAT: the audio-sync stage will replace this timer with
-    /// a scheduled advance at the element's spoken word time — the advance itself
-    /// (`advanceOrReturnAfterPointing`) is a separate step, unchanged by that swap.
+    /// it cleanly.
+    ///
+    /// Stage 4 (audio-sync): when `pointingAdvanceIsAudioSynced` is set, the manager's
+    /// audio-sync scheduler drives `advanceToNextPointingTarget` at each element's spoken
+    /// word time. In that mode this FIXED dwell must NOT also advance to the next target
+    /// (that would double-drive the walk and race the audio) — so we skip scheduling for
+    /// any non-final target and let the scheduled advance (observed via
+    /// `currentPointingTargetIndex`) move the buddy on. We STILL run the dwell for the LAST
+    /// target, whose only remaining move is to fly BACK to the cursor: nothing external
+    /// drives that, so the fixed dwell → returnToCursor still owns it. When NOT audio-synced
+    /// (Apple TTS, ElevenLabs failed/empty alignment) this is the unchanged Stage 1–3 walk.
     private func schedulePointingDwellThenAdvance() {
         pointingDwellWorkItem?.cancel()
+
+        let targetCount = companionManager.detectedElementTargets.count
+        let currentIndex = companionManager.currentPointingTargetIndex ?? (targetCount - 1)
+        let isLastTarget = nextPointingSequenceStep(currentIndex: currentIndex, targetCount: targetCount) == .returnToCursor
+        if companionManager.pointingAdvanceIsAudioSynced && !isLastTarget {
+            // The audio-sync scheduler owns the advance to the next target.
+            return
+        }
 
         let dwellWork = DispatchWorkItem { [self] in
             guard buddyNavigationMode == .pointingAtTarget else { return }

@@ -110,6 +110,111 @@ final class ElevenLabsTTSClient: NSObject, SpeechTTSProviding {
         print("🔊 ElevenLabs TTS: speaking \(trimmedText.count) characters")
     }
 
+    /// Speaks `text` via the ElevenLabs `/with-timestamps` endpoint and returns the
+    /// character-level `alignment` plus a reader for THIS clip's own playhead, so the
+    /// caller can sync the shadow cursor to the spoken words. Throws on any failure (so
+    /// the streaming speaker falls back to Apple for this clip).
+    ///
+    /// Model fallback: flash is tried first (lowest latency); on a fallback-worthy
+    /// failure we retry with turbo, and ONLY turbo (never multilingual — see
+    /// `ElevenLabsAPI.timestampModelFallbackChain`). Both were verified to return the
+    /// `alignment` object.
+    ///
+    /// TRAP 2 (per-clip timing): the returned playhead reader is bound to the SPECIFIC
+    /// `AVAudioPlayer` created for this clip. Its `currentTime` is measured from this
+    /// clip's own zero, and the reader returns nil once this player is no longer the
+    /// active one (the next clip replaced it) so a stale point never waits on the wrong
+    /// clip's timeline.
+    func speakTextReportingTiming(_ text: String) async throws -> SpokenClipTiming {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return .none }
+
+        let usableAPIKey = apiKey
+        apiKey = nil
+        guard let usableAPIKey, TTSProviderSelection.isUsableElevenLabsKey(usableAPIKey) else {
+            throw ElevenLabsTTSError.missingAPIKey
+        }
+
+        stopPlayback()
+
+        // Try flash, then turbo (the only fallback). Any non-cancellation failure of one
+        // model falls through to the next; cancellation aborts immediately.
+        var currentModelID: String? = ElevenLabsAPI.timestampPrimaryModelID
+        var lastError: Error = ElevenLabsTTSError.emptyAudio
+        while let modelID = currentModelID {
+            do {
+                return try await synthesizeTimedClip(
+                    apiKey: usableAPIKey,
+                    text: trimmedText,
+                    modelID: modelID
+                )
+            } catch {
+                // The user spoke again — abort, don't burn the fallback on a stale turn.
+                if !TTSProviderSelection.shouldFallBackToApple(for: error) { throw error }
+                lastError = error
+                currentModelID = ElevenLabsAPI.nextTimestampModel(after: modelID)
+            }
+        }
+        throw lastError
+    }
+
+    /// One `/with-timestamps` request→decode→play for a single model. Factored out so the
+    /// flash→turbo fallback loop above stays readable.
+    private func synthesizeTimedClip(
+        apiKey: String,
+        text: String,
+        modelID: String
+    ) async throws -> SpokenClipTiming {
+        let speechRequest = try ElevenLabsAPI.makeSpeechWithTimestampsRequest(
+            apiKey: apiKey,
+            voiceID: voiceID,
+            text: text,
+            modelID: modelID,
+            requestTimeout: requestTimeoutSeconds
+        )
+
+        let (responseData, response) = try await urlSession.data(for: speechRequest)
+        try Task.checkCancellation()
+
+        if let httpResponse = response as? HTTPURLResponse,
+           !ElevenLabsAPI.isSuccessStatus(httpResponse.statusCode) {
+            throw ElevenLabsTTSError.httpStatus(httpResponse.statusCode)
+        }
+
+        let timestampedSpeech = try ElevenLabsAPI.parseSpeechWithTimestamps(from: responseData)
+        let player = try await Self.decodeAudioPlayer(from: timestampedSpeech.audioData)
+        try Task.checkCancellation()
+
+        player.delegate = self
+        audioPlayer = player
+
+        isCurrentlyPlaying = true
+        guard player.play() else {
+            isCurrentlyPlaying = false
+            audioPlayer = nil
+            throw ElevenLabsTTSError.playbackFailed
+        }
+        print("🔊 ElevenLabs TTS (with-timestamps, \(modelID)): speaking \(text.count) characters")
+
+        // TRAP 2: bind the playhead reader to THIS specific player. It returns nil once
+        // this player is no longer the active `audioPlayer` (superseded by the next clip)
+        // or it has stopped playing — so a pending point for this clip advances promptly
+        // instead of waiting on a timeline that no longer applies.
+        let clipPlayer = player
+        let playheadReader: @MainActor () -> TimeInterval? = { [weak self, weak clipPlayer] in
+            guard let self, let clipPlayer,
+                  self.audioPlayer === clipPlayer, clipPlayer.isPlaying else {
+                return nil
+            }
+            return clipPlayer.currentTime
+        }
+
+        return SpokenClipTiming(
+            alignment: timestampedSpeech.alignment.isEmpty ? nil : timestampedSpeech.alignment,
+            playheadSecondsReader: playheadReader
+        )
+    }
+
     /// Decodes MP3 audio data into an AVAudioPlayer off the main actor. Runs on a
     /// detached task so the (potentially non-trivial) decode doesn't block the
     /// main thread; the returned player is then used only from @MainActor.

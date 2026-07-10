@@ -103,6 +103,14 @@ final class CompanionManager: ObservableObject {
     /// BlueCursorView uses this instead of a random pointer phrase.
     @Published var detectedElementBubbleText: String?
 
+    /// Whether the CURRENT pointing sequence's advances are driven by the ElevenLabs
+    /// audio clock (Stage 4) rather than the fixed per-point dwell. When true, the overlay
+    /// must NOT auto-advance on its dwell timer for non-final targets — the manager's
+    /// audio-sync scheduler calls `advanceToNextPointingTarget` at each element's spoken
+    /// word time (minus a lead). When false (Apple TTS, ElevenLabs failed/empty alignment,
+    /// or no timing) the overlay keeps its Stage 1–3 fixed-dwell walk (graceful degradation).
+    @Published var pointingAdvanceIsAudioSynced = false
+
     /// Whether a pointing sequence is currently active (targets are being visited or
     /// the buddy is flying back). Used by the transient-cursor hide timing so the
     /// overlay never fades out mid-flight.
@@ -285,6 +293,21 @@ final class CompanionManager: ObservableObject {
     /// fade-out can see that audio is still playing.
     private var currentSentenceBuffer: SentenceStreamBuffer?
     private var currentResponseSpeaker: StreamingResponseSpeaker?
+
+    // MARK: - Audio-synced pointing (Stage 4)
+
+    /// Each ElevenLabs clip's timing report, keyed by clip ordinal (0 = first sentence,
+    /// 1 = batched remainder), collected via the speaker's `onClipSpoken` as clips start.
+    /// The audio-sync scheduler reads these to find each point's clip + playhead. Reset at
+    /// the start of every turn (in `stopAllTTS`).
+    private var audioSyncClipReports: [Int: SpokenClipReport] = [:]
+    /// The character length of clip 0's spoken text, captured when clip 0 is reported. Used
+    /// to assign each point to clip 0 vs clip 1 and to re-base clip-1 positions (TRAP 2).
+    private var audioSyncFirstClipTextLength: Int?
+    /// The running scheduler that walks the ordered points and calls
+    /// `advanceToNextPointingTarget` at each one's spoken word time. Cancelled on a new
+    /// turn / stop so a stale schedule can never advance after the audio moved on.
+    private var audioSyncPointingScheduler: Task<Void, Never>?
 
     private var shortcutTransitionCancellable: AnyCancellable?
     /// Subscription to the monitor's Escape key-down signal, routed to the
@@ -826,6 +849,9 @@ final class CompanionManager: ObservableObject {
         detectedElementTargets = []
         currentPointingTargetIndex = nil
         detectedElementBubbleText = nil
+        // Any audio-synced schedule is tied to this sequence — tear it down with it so a
+        // stale advance can't fire after pointing was cleared (Stage 4).
+        cancelAudioSyncedPointing()
     }
 
     /// Begins an ordered pointing sequence: the blue cursor will fly to each target
@@ -1760,6 +1786,11 @@ final class CompanionManager: ObservableObject {
                         self?.voiceState = .responding
                         // Audio has begun — the thinking cue is no longer needed.
                         self?.markAnswerOrAudioStartedHidingThinkingCue()
+                    },
+                    // Stage 4: capture each ElevenLabs clip's timing as it starts so the
+                    // audio-sync scheduler can advance the cursor at each element's word.
+                    onClipSpoken: { [weak self] clipReport in
+                        self?.recordSpokenClipForAudioSync(clipReport)
                     }
                 )
                 currentSentenceBuffer = sentenceBuffer
@@ -1832,8 +1863,11 @@ final class CompanionManager: ObservableObject {
                 // Map each parsed point to a global on-screen target, in order.
                 // Each point picks the screen capture matching its screen number,
                 // falling back to the cursor screen when it wasn't specified. A
-                // point whose screen can't be resolved is dropped.
-                let pointingTargets: [DetectedElementTarget] = parseResult.points.compactMap { parsedPoint in
+                // point whose screen can't be resolved is dropped. We keep each target
+                // PAIRED with its parsed point's spoken position so the audio-sync
+                // scheduler advances each target at the right word (a dropped point must
+                // not shift the remaining targets' positions).
+                let pointingTargetsWithSpokenPositions: [(target: DetectedElementTarget, spokenPosition: Int)] = parseResult.points.compactMap { parsedPoint in
                     let targetScreenCapture: CompanionScreenCapture? = {
                         if let screenNumber = parsedPoint.screenNumber,
                            screenNumber >= 1 && screenNumber <= screenCaptures.count {
@@ -1855,12 +1889,14 @@ final class CompanionManager: ObservableObject {
                         displayHeightInPoints: targetScreenCapture.displayHeightInPoints,
                         displayFrame: displayFrame
                     )
-                    return DetectedElementTarget(
+                    let target = DetectedElementTarget(
                         screenLocation: globalLocation,
                         displayFrame: displayFrame,
                         elementLabel: parsedPoint.elementLabel
                     )
+                    return (target, parsedPoint.spokenPosition)
                 }
+                let pointingTargets = pointingTargetsWithSpokenPositions.map(\.target)
 
                 // Handle element pointing if Claude returned any targets.
                 // Switch to idle BEFORE starting the sequence so the triangle
@@ -1871,8 +1907,20 @@ final class CompanionManager: ObservableObject {
                     for target in pointingTargets {
                         ClawdyAnalytics.trackElementPointed(elementLabel: target.elementLabel)
                     }
+                    // Stage 4 — decide audio-sync BEFORE starting the sequence so the
+                    // overlay sees the flag on its first dwell and never double-drives the
+                    // advance. Audio-sync is on only when ElevenLabs actually produced
+                    // timing for clip 0 (present because the first sentence was spoken
+                    // during streaming); otherwise we degrade to the fixed-dwell walk.
+                    let audioSynced = canAudioSyncPointing()
+                    pointingAdvanceIsAudioSynced = audioSynced
                     beginPointingSequence(pointingTargets)
-                    print("🎯 Element pointing sequence: \(pointingTargets.count) target(s)")
+                    if audioSynced {
+                        startAudioSyncedPointingSchedule(
+                            spokenPositionsByTargetIndex: pointingTargetsWithSpokenPositions.map(\.spokenPosition)
+                        )
+                    }
+                    print("🎯 Element pointing sequence: \(pointingTargets.count) target(s), audioSynced=\(audioSynced)")
                 } else {
                     print("🎯 Element pointing: no element")
                 }
@@ -2015,8 +2063,139 @@ final class CompanionManager: ObservableObject {
         currentSentenceBuffer = nil
         localTTSClient.stopPlayback()
         elevenLabsTTSClient.stopPlayback()
+        // Tear down any audio-synced pointing schedule from the previous turn so a stale
+        // timer can never advance the cursor after the audio has moved on (Stage 4).
+        cancelAudioSyncedPointing()
         // A new utterance (or a re-press) is taking over — clear any thinking cue.
         cancelThinkingCue()
+    }
+
+    /// Cancels the audio-sync pointing scheduler and clears its per-turn state. Called at
+    /// the start of every turn (via `stopAllTTS`) and when a sequence is superseded, so the
+    /// scheduled advances never outlive the audio they were timed against.
+    private func cancelAudioSyncedPointing() {
+        audioSyncPointingScheduler?.cancel()
+        audioSyncPointingScheduler = nil
+        audioSyncClipReports = [:]
+        audioSyncFirstClipTextLength = nil
+        pointingAdvanceIsAudioSynced = false
+    }
+
+    /// Records one ElevenLabs clip's timing as its audio starts (wired to the speaker's
+    /// `onClipSpoken`). Capturing clip 0's text length here lets the scheduler assign each
+    /// point to the right clip and re-base clip-1 positions (TRAP 2).
+    private func recordSpokenClipForAudioSync(_ report: SpokenClipReport) {
+        audioSyncClipReports[report.clipOrdinal] = report
+        if report.clipOrdinal == 0 {
+            audioSyncFirstClipTextLength = report.clipText.count
+        }
+    }
+
+    /// Whether the current turn can drive pointing from the ElevenLabs audio clock. True
+    /// only when clip 0 was reported WITH non-empty alignment — the reliable proxy that
+    /// ElevenLabs is the active provider and timing is actually flowing (clip 0 is the
+    /// first sentence, spoken during streaming, so its report is already in hand by the
+    /// time we reach the pointing decision). False (→ graceful degradation to the fixed
+    /// per-point dwell) for Apple TTS, an ElevenLabs failure/fallback, or empty alignment.
+    private func canAudioSyncPointing() -> Bool {
+        guard let firstClip = audioSyncClipReports[0],
+              let alignment = firstClip.timing.alignment,
+              !alignment.isEmpty else {
+            return false
+        }
+        return true
+    }
+
+    /// Starts the scheduler that walks the ordered pointing targets in step with the
+    /// spoken audio. Target 0 is already shown by `beginPointingSequence`; this times the
+    /// ADVANCE to targets 1…n-1 so the cursor ARRIVES on each just before its element is
+    /// named. Each advance is scheduled against the SAME clip's playhead its word time was
+    /// computed from (TRAP 2). A point whose clip never yields timing advances immediately
+    /// so the sequence never stalls.
+    private func startAudioSyncedPointingSchedule(spokenPositionsByTargetIndex: [Int]) {
+        audioSyncPointingScheduler?.cancel()
+        // If clip 0's length is somehow unknown, treat everything as clip 0 (positions
+        // then index clip 0's alignment directly) rather than mis-assigning to clip 1.
+        let firstClipTextLength = audioSyncFirstClipTextLength ?? Int.max
+        let targetCount = spokenPositionsByTargetIndex.count
+
+        audioSyncPointingScheduler = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var targetIndex = 1
+            while targetIndex < targetCount {
+                if Task.isCancelled { return }
+
+                let spokenPosition = spokenPositionsByTargetIndex[targetIndex]
+                let assignment = PointAudioSyncMapper.clipAssignment(
+                    spokenPosition: spokenPosition,
+                    firstClipTextLength: firstClipTextLength
+                )
+
+                // Wait (bounded) for this point's clip to be reported — clip 1 (the batched
+                // remainder) is spoken only after clip 0 finishes, so its report can arrive
+                // well after the sequence began.
+                let clipReport = await self.awaitClipReport(ordinal: assignment.clipOrdinal)
+                if Task.isCancelled { return }
+
+                if let clipReport,
+                   let alignment = clipReport.timing.alignment,
+                   let fireTimeSeconds = PointAudioSyncMapper.fireTimeSeconds(
+                       alignment: alignment,
+                       positionInClip: assignment.positionInClip,
+                       strategy: PointAudioSyncTuning.anchorStrategy,
+                       leadSeconds: PointAudioSyncTuning.leadSeconds
+                   ) {
+                    // Poll THIS clip's own playhead until it reaches the fire time (word
+                    // start − lead). TRAP 2: the reader is bound to the clip we mapped
+                    // against, so we never wait on a different clip's timeline.
+                    await self.waitForClipPlayhead(
+                        clipReport.timing.playheadSecondsReader,
+                        toReachSeconds: fireTimeSeconds
+                    )
+                } // else: no timing for this clip → fall through and advance immediately.
+
+                if Task.isCancelled { return }
+                self.advanceToNextPointingTarget()
+                targetIndex += 1
+            }
+        }
+    }
+
+    /// Waits (bounded) for the clip with `ordinal` to be reported, returning it or nil if
+    /// it never arrives within the ceiling. Polls the reports the speaker fills in as each
+    /// clip's audio starts.
+    private func awaitClipReport(ordinal: Int) async -> SpokenClipReport? {
+        let pollIntervalNanoseconds: UInt64 = 30_000_000 // 30ms
+        let maximumPolls = 400 // ~12s ceiling — well past any realistic clip 0→clip 1 gap
+        var pollsRemaining = maximumPolls
+        while pollsRemaining > 0 {
+            if Task.isCancelled { return nil }
+            if let report = audioSyncClipReports[ordinal] { return report }
+            try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+            pollsRemaining -= 1
+        }
+        return audioSyncClipReports[ordinal]
+    }
+
+    /// Polls `playheadReader` until this clip's playhead reaches `fireTimeSeconds`, then
+    /// returns so the caller advances the cursor. Returns early when the reader yields nil
+    /// (the clip finished or was superseded — the word already passed, so advance now) or
+    /// on a safety ceiling, so a point can never wedge the sequence.
+    private func waitForClipPlayhead(
+        _ playheadReader: (@MainActor () -> TimeInterval?)?,
+        toReachSeconds fireTimeSeconds: Double
+    ) async {
+        guard let playheadReader else { return }
+        let pollIntervalNanoseconds: UInt64 = 25_000_000 // 25ms — fine-grained for tight sync
+        let maximumPolls = 800 // ~20s ceiling
+        var pollsRemaining = maximumPolls
+        while pollsRemaining > 0 {
+            if Task.isCancelled { return }
+            guard let currentPlayheadSeconds = playheadReader() else { return }
+            if currentPlayheadSeconds >= fireTimeSeconds { return }
+            try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+            pollsRemaining -= 1
+        }
     }
 
     /// Resolves which research session (if any) a spoken follow-up should continue,
@@ -2363,11 +2542,16 @@ final class CompanionManager: ObservableObject {
         /// The character offset of this tag's opening `[` within the ORIGINAL
         /// response text (tags still present).
         ///
-        /// IMPORTANT — character offset is preserved for the upcoming audio-sync
-        /// stage (0.0.2): it maps each point to its word in the ElevenLabs alignment
-        /// array (so the cursor can arrive exactly as the element's word is spoken).
-        /// Do not remove.
+        /// IMPORTANT — character offset is preserved for the audio-sync stage: it maps
+        /// each point to its word in the ElevenLabs alignment array (so the cursor can
+        /// arrive exactly as the element's word is spoken). Do not remove.
         let characterOffset: Int
+        /// The position of this tag within the SPOKEN (tag-stripped, trimmed) text — i.e.
+        /// where the element's naming word ends and the tag sat. This is the audio-sync
+        /// anchor: it maps into the spoken clip's `alignment` array to find the audio time
+        /// the element is named. Derived from `characterOffset` by removing the earlier
+        /// tags' and the leading trim's character counts (see `parsePointingCoordinates`).
+        let spokenPosition: Int
     }
 
     /// Result of parsing the [POINT:...] tags from Claude's response.
@@ -2441,11 +2625,25 @@ final class CompanionManager: ObservableObject {
         let fullRange = NSRange(responseText.startIndex..., in: responseText)
         let matches = regex.matches(in: responseText, range: fullRange)
 
+        // How many leading whitespace characters `spokenText` trimmed off the front of the
+        // tag-stripped text. A tag's spoken position must be shifted left by this so it
+        // indexes into the same (trimmed) text the TTS clip alignment covers.
+        let strippedFullText = SentenceStreamBuffer.strippingPointTag(from: responseText)
+        let leadingTrimmedCount = strippedFullText.prefix { $0.isWhitespace || $0.isNewline }.count
+
         var points: [ParsedPoint] = []
         for match in matches {
             guard let tagRange = Range(match.range, in: responseText) else { continue }
             // Character offset of this tag's opening `[` within the original text.
             let characterOffset = responseText.distance(from: responseText.startIndex, to: tagRange.lowerBound)
+
+            // The tag's position in the SPOKEN (tag-stripped, trimmed) text: strip the
+            // earlier tags out of everything BEFORE this tag (the prefix ends right before
+            // this tag's `[`, so it contains no partial tag), then remove the leading trim.
+            // This is where the element's naming word ends — the audio-sync anchor.
+            let originalPrefix = String(responseText[responseText.startIndex..<tagRange.lowerBound])
+            let strippedPrefixCount = SentenceStreamBuffer.strippingPointTag(from: originalPrefix).count
+            let spokenPosition = max(0, strippedPrefixCount - leadingTrimmedCount)
 
             // [POINT:none] has no coordinate capture groups — it is stripped from the
             // spoken text but contributes no target to point at.
@@ -2470,7 +2668,8 @@ final class CompanionManager: ObservableObject {
                 coordinate: CGPoint(x: x, y: y),
                 elementLabel: elementLabel,
                 screenNumber: screenNumber,
-                characterOffset: characterOffset
+                characterOffset: characterOffset,
+                spokenPosition: spokenPosition
             ))
         }
 

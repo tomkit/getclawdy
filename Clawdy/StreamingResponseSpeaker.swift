@@ -26,6 +26,26 @@
 
 import Foundation
 
+/// Reports ONE spoken ElevenLabs clip the moment its audio starts, so the manager can
+/// schedule audio-synced cursor advances against THIS clip's own playhead.
+///
+/// TRAP 2 (per-clip timing): a response is spoken as SEPARATE clips — clip 0 is the first
+/// sentence, clip 1 is the batched remainder — and each clip's alignment times are
+/// relative to that clip's OWN zero, not a global timeline. The `clipOrdinal` + `clipText`
+/// let the manager map each POINT to the word within the SAME clip's substring, and the
+/// `timing.playheadSecondsReader` is that clip's own playhead. Apple clips are never
+/// reported (they carry no alignment); only the timed ElevenLabs path reports.
+struct SpokenClipReport {
+    /// 0-based order the clip was spoken in: 0 = first sentence (or the whole reply when
+    /// no sentence completed mid-stream), 1 = the batched remainder.
+    let clipOrdinal: Int
+    /// The exact text spoken in this clip — the substring of the full spoken text the
+    /// manager maps POINT positions into.
+    let clipText: String
+    /// The clip's character-level timing + own playhead (may be nil alignment → degrade).
+    let timing: SpokenClipTiming
+}
+
 @MainActor
 final class StreamingResponseSpeaker {
     private let provider: TTSEngineKind
@@ -44,6 +64,15 @@ final class StreamingResponseSpeaker {
     /// Called once, the moment the very first audio starts playing, so the UI can
     /// flip out of the spinner/processing state.
     private let onPlaybackStarted: @MainActor () -> Void
+
+    /// Called each time an ElevenLabs clip's audio STARTS, carrying that clip's timing so
+    /// the manager can schedule audio-synced cursor advances against it. nil (default) for
+    /// the non-pointing speak paths and for Apple TTS (which produces no alignment).
+    private let onClipSpoken: (@MainActor (SpokenClipReport) -> Void)?
+
+    /// How many ElevenLabs clips have been spoken so far, so each report carries the right
+    /// `clipOrdinal` (0 = first sentence, 1 = batched remainder).
+    private var elevenLabsClipsSpokenCount = 0
 
     /// Serializes utterances: each new utterance awaits the previous one's Task.
     private var pendingSpeechChain: Task<Void, Never> = Task {}
@@ -64,7 +93,8 @@ final class StreamingResponseSpeaker {
         elevenLabsTTSClient: ElevenLabsTTSClient,
         elevenLabsAPIKeyProvider: @escaping () -> String?,
         elevenLabsVoiceID: String,
-        onPlaybackStarted: @escaping @MainActor () -> Void
+        onPlaybackStarted: @escaping @MainActor () -> Void,
+        onClipSpoken: (@MainActor (SpokenClipReport) -> Void)? = nil
     ) {
         self.provider = provider
         self.appleTTSClient = appleTTSClient
@@ -72,6 +102,7 @@ final class StreamingResponseSpeaker {
         self.elevenLabsAPIKeyProvider = elevenLabsAPIKeyProvider
         self.elevenLabsVoiceID = elevenLabsVoiceID
         self.onPlaybackStarted = onPlaybackStarted
+        self.onClipSpoken = onClipSpoken
     }
 
     /// True while any queued utterance is still pending or audio is playing.
@@ -170,8 +201,15 @@ final class StreamingResponseSpeaker {
             elevenLabsTTSClient.apiKey = elevenLabsAPIKeyProvider()
             elevenLabsTTSClient.voiceID = elevenLabsVoiceID
             do {
-                try await elevenLabsTTSClient.speakText(text)
+                // Speak through the with-timestamps path so we get this clip's character
+                // alignment + playhead. TRAP 2: report it tagged with THIS clip's ordinal
+                // and text, so the manager syncs each POINT to the word within the SAME
+                // clip's own (zero-based) timeline — never a global one.
+                let clipTiming = try await elevenLabsTTSClient.speakTextReportingTiming(text)
                 markPlaybackStartedIfNeeded()
+                let clipOrdinal = elevenLabsClipsSpokenCount
+                elevenLabsClipsSpokenCount += 1
+                onClipSpoken?(SpokenClipReport(clipOrdinal: clipOrdinal, clipText: text, timing: clipTiming))
                 await waitForPlaybackToFinish(isPlaying: { [weak self] in self?.elevenLabsTTSClient.isPlaying ?? false })
                 return
             } catch {

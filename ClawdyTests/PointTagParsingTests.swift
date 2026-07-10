@@ -102,6 +102,46 @@ struct PointTagParsingTests {
         #expect(result.points[1].characterOffset < result.points[2].characterOffset)
     }
 
+    // MARK: - Spoken position (audio-sync anchor)
+
+    /// The word immediately before `position` in `text`, so a test can assert a point's
+    /// `spokenPosition` lands right after the element's naming word.
+    private func wordBefore(_ text: String, position: Int) -> String {
+        let characters = Array(text)
+        var index = min(max(0, position), characters.count) - 1
+        if index < 0 { return "" }
+        while index > 0 && characters[index] == " " { index -= 1 }
+        let wordEnd = index + 1
+        var wordStart = index
+        while wordStart > 0 && characters[wordStart - 1] != " " { wordStart -= 1 }
+        return String(characters[wordStart..<wordEnd])
+    }
+
+    /// Each point's `spokenPosition` is its position in the TAG-STRIPPED spoken text —
+    /// right after the element's naming word — even when earlier tags shift the raw offset.
+    /// This is the audio-sync anchor that maps into the ElevenLabs alignment array.
+    @Test func spokenPositionLandsRightAfterEachNamingWord() {
+        let response = "click source control [POINT:285,11:source control] then hit commit [POINT:180,540:commit button] to save."
+        let result = CompanionManager.parsePointingCoordinates(from: response)
+        #expect(result.points.count == 2)
+
+        // The spoken text has the tags removed; each spokenPosition indexes into IT.
+        #expect(wordBefore(result.spokenText, position: result.points[0].spokenPosition) == "control")
+        #expect(wordBefore(result.spokenText, position: result.points[1].spokenPosition) == "commit")
+        // Positions are within the spoken text and strictly increasing.
+        #expect(result.points[0].spokenPosition <= result.spokenText.count)
+        #expect(result.points[0].spokenPosition < result.points[1].spokenPosition)
+    }
+
+    /// Leading whitespace trimmed off the spoken text must be subtracted from spokenPosition
+    /// so it still lines up with the trimmed text the TTS clip alignment covers.
+    @Test func spokenPositionAccountsForLeadingWhitespaceTrim() {
+        let result = CompanionManager.parsePointingCoordinates(from: "   go here [POINT:1,2:here]")
+        #expect(result.spokenText == "go here")
+        #expect(result.points.count == 1)
+        #expect(wordBefore(result.spokenText, position: result.points[0].spokenPosition) == "here")
+    }
+
     /// A [POINT:none] mixed in among real tags is stripped but contributes no
     /// target (defensive — the model shouldn't do this, but we must not crash or
     /// emit a bogus point).
