@@ -34,6 +34,33 @@ struct SentenceStreamBufferTests {
         #expect(SentenceStreamBuffer.strippingPointTag(from: "use array[0] here") == "use array[0] here")
     }
 
+    @Test func strippingRemovesInlinePointTagMidText() {
+        // Tags are now emitted INLINE, right after the clause naming each element —
+        // a trailing-only strip would read them aloud. Every complete tag anywhere
+        // must be removed.
+        #expect(
+            SentenceStreamBuffer.strippingPointTag(from: "click here [POINT:10,20:save] and you're done")
+                == "click here  and you're done"
+        )
+    }
+
+    @Test func strippingRemovesMultipleInlineTagsInOneReply() {
+        let stripped = SentenceStreamBuffer.strippingPointTag(
+            from: "first this [POINT:1,2:a] then that [POINT:3,4:b] to finish"
+        )
+        #expect(!stripped.contains("[POINT:"))
+        #expect(stripped == "first this  then that  to finish")
+    }
+
+    @Test func strippingRemovesInlineTagsButStillWithholdsATrailingPartial() {
+        // A completed inline tag is removed AND a half-typed tag still arriving at
+        // the end is withheld so streamed TTS never speaks either.
+        #expect(
+            SentenceStreamBuffer.strippingPointTag(from: "click here [POINT:10,20:save] then [POI")
+                == "click here  then "
+        )
+    }
+
     // MARK: - Sentence boundary detection (static, pure)
 
     @Test func confirmedBoundaryRequiresWhitespaceAfterTerminator() {
@@ -96,6 +123,28 @@ struct SentenceStreamBufferTests {
 
         // Final authoritative text: tag stripped, nothing already-spoken repeated.
         let final = buffer.consumeFinalText("ah, gotcha. that's the run button up top. [POINT:285,11:run button]")
+        #expect(final == nil)
+    }
+
+    @Test func inlinePointTagIsNeverSpokenAcrossStreamingAndFinalPasses() {
+        // A reply with a tag in the MIDDLE (not just the end) must never surface the
+        // tag in any spoken chunk, and the surrounding words must all still be spoken.
+        let buffer = SentenceStreamBuffer()
+
+        // The tag arrives mid-stream, right after "run button". Only the completed
+        // first sentence is spoken; the inline tag is stripped out of it.
+        let firstBatch = buffer.consumeAccumulatedText("that's the run button [POINT:40,11:run button] up top. now ")
+        #expect(firstBatch == ["that's the run button  up top."])
+        #expect(!firstBatch.joined().contains("[POINT:"))
+
+        // The rest streams in with a second inline tag, then the reply ends.
+        let secondBatch = buffer.consumeAccumulatedText("that's the run button [POINT:40,11:run button] up top. now open the menu [POINT:210,11:menu] here. ")
+        #expect(secondBatch == ["now open the menu  here."])
+        #expect(!secondBatch.joined().contains("[POINT:"))
+
+        // Final authoritative text: nothing already-spoken is repeated and no tag
+        // leaks into the remainder.
+        let final = buffer.consumeFinalText("that's the run button [POINT:40,11:run button] up top. now open the menu [POINT:210,11:menu] here.")
         #expect(final == nil)
     }
 

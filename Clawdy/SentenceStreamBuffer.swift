@@ -9,8 +9,9 @@
 //  cutting the long silent gap between the model finishing and audio starting.
 //
 //  Two guarantees, both important:
-//   - A trailing `[POINT:x,y:label]` tag (which only ever appears at the very end)
-//     is never spoken — even while it's still arriving character-by-character.
+//   - Any `[POINT:x,y:label]` tag — now emitted INLINE, right after the clause
+//     naming each element (there can be several, in order) as well as at the very
+//     end — is never spoken, even while a tag is still arriving character-by-character.
 //   - Each chunk of text is handed to TTS exactly once: `consumeAccumulatedText`
 //     returns only newly-completed sentences, and `consumeFinalText` returns only
 //     whatever is still unspoken once the authoritative final text is known.
@@ -62,30 +63,35 @@ final class SentenceStreamBuffer {
 
     // MARK: - Pure helpers (static so they're independently unit-testable)
 
-    /// Removes a `[POINT:...]` tag so it is never spoken. Handles both the
-    /// complete tag at the end and a tag that is still arriving (a trailing
-    /// fragment that is the start of, or an unclosed, `[POINT:` tag) so streamed
-    /// TTS never speaks a partial tag.
+    /// Removes every `[POINT:...]` tag so none are ever spoken. Handles complete
+    /// tags ANYWHERE in the text (they are now emitted inline, mid-sentence, right
+    /// after each clause naming an element — not just once at the very end) AND a
+    /// tag that is still arriving (a trailing fragment that is the start of, or an
+    /// unclosed, `[POINT:` tag) so streamed TTS never speaks a partial tag.
     static func strippingPointTag(from text: String) -> String {
-        // A complete trailing tag: [POINT:anything-without-a-closing-bracket]
-        if let completeTagRange = text.range(
-            of: #"\[POINT:[^\]]*\]\s*$"#,
+        // Remove every COMPLETE tag wherever it appears: [POINT:...] (up to the
+        // first closing bracket). A trailing-only strip would leave a mid-sentence
+        // inline tag to be read aloud, so we match all occurrences. This keeps the
+        // spoken text prefix-STABLE in the already-spoken region (text only ever
+        // appends, and the text before a tag is unchanged by removing the tag), so
+        // the `spokenCharacterCount` bookkeeping above never drifts.
+        var cleaned = text.replacingOccurrences(
+            of: #"\[POINT:[^\]]*\]"#,
+            with: "",
             options: .regularExpression
-        ) {
-            return String(text[..<completeTagRange.lowerBound])
-        }
+        )
 
-        // An in-progress tag at the very end: from the last '[', if that tail is
-        // either a prefix of "[POINT:" (e.g. "[", "[PO") or an unclosed
-        // "[POINT:..." being typed, drop it so it's withheld until complete.
-        if let lastOpeningBracketIndex = text.lastIndex(of: "[") {
-            let trailingFragment = text[lastOpeningBracketIndex...]
+        // An in-progress tag still arriving at the very end: from the last '[', if
+        // that tail is either a prefix of "[POINT:" (e.g. "[", "[PO") or an unclosed
+        // "[POINT:..." being typed, drop it so it's withheld until it completes.
+        if let lastOpeningBracketIndex = cleaned.lastIndex(of: "[") {
+            let trailingFragment = cleaned[lastOpeningBracketIndex...]
             if "[POINT:".hasPrefix(trailingFragment) || trailingFragment.hasPrefix("[POINT:") {
-                return String(text[..<lastOpeningBracketIndex])
+                cleaned = String(cleaned[..<lastOpeningBracketIndex])
             }
         }
 
-        return text
+        return cleaned
     }
 
     /// Returns the character offset just past the last CONFIRMED sentence

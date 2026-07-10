@@ -100,6 +100,32 @@ enum BuddyNavigationMode {
     case pointingAtTarget
 }
 
+/// The next move when the buddy finishes dwelling on a pointing target: either
+/// ADVANCE to the next target in the ordered sequence, or RETURN to the cursor
+/// because the last target was reached.
+enum PointingSequenceStep: Equatable {
+    /// Advance to the target at this index and point at it next.
+    case advance(toIndex: Int)
+    /// The sequence is exhausted — fly the buddy back to the cursor and clear.
+    case returnToCursor
+}
+
+/// Pure, testable decision for walking an ordered pointing sequence: given the
+/// index just finished and the total number of targets, decide whether to advance
+/// to the next target (and to which index) or to return to the cursor. Isolated
+/// from AppKit so the walk order is unit-tested without a live screen.
+///
+/// FORWARD-COMPAT: the overlay calls this from a fixed per-point dwell today; the
+/// upcoming audio-sync stage will drive the same advance from a scheduled word
+/// time. The decision of what comes next is deliberately independent of WHEN.
+func nextPointingSequenceStep(currentIndex: Int, targetCount: Int) -> PointingSequenceStep {
+    let nextIndex = currentIndex + 1
+    if nextIndex < targetCount {
+        return .advance(toIndex: nextIndex)
+    }
+    return .returnToCursor
+}
+
 // SwiftUI view for the blue glowing cursor pointer.
 // Each screen gets its own BlueCursorView. The view checks whether
 // the cursor is currently on THIS screen and only shows the buddy
@@ -166,6 +192,23 @@ struct BlueCursorView: View {
     /// Timer driving the frame-by-frame bezier arc flight animation.
     /// Invalidated when the flight completes, is canceled, or the view disappears.
     @State private var navigationAnimationTimer: Timer?
+
+    /// The pending "dwell then advance/return" work while the buddy is pointing at a
+    /// target. Held so a new navigation (advancing to the next target, or a whole new
+    /// sequence replacing this one) can CANCEL it cleanly — no overlapping timers.
+    @State private var pointingDwellWorkItem: DispatchWorkItem?
+
+    /// How long the buddy dwells pointing at EACH target before advancing to the
+    /// next. Kept short (vs the former single-point 3.0s hold) so a 3–4 point
+    /// sequence doesn't take ~15 seconds. The bubble then fades over
+    /// `pointingBubbleFadeSeconds` before the buddy moves on.
+    ///
+    /// FORWARD-COMPAT: this dwell is only the DEFAULT trigger for advancing. The
+    /// upcoming audio-sync stage will instead advance at each element's spoken word
+    /// time (minus a lead offset); the advance step (`advanceOrReturnAfterPointing`)
+    /// is deliberately separated from this timer so that swap needs no restructure.
+    private static let perPointDwellSeconds: Double = 1.3
+    private static let pointingBubbleFadeSeconds: Double = 0.4
 
     /// Scale factor applied to the buddy triangle during flight. Grows to ~1.3x
     /// at the midpoint of the arc and shrinks back to 1.0x on landing, creating
@@ -439,37 +482,55 @@ struct BlueCursorView: View {
         .onDisappear {
             timer?.invalidate()
             navigationAnimationTimer?.invalidate()
+            pointingDwellWorkItem?.cancel()
+            pointingDwellWorkItem = nil
         }
-        .onChange(of: companionManager.detectedElementScreenLocation) { newLocation in
-            // When a UI element location is detected, navigate the buddy to
-            // that position so it points at the element.
-            guard let screenLocation = newLocation,
-                  let displayFrame = companionManager.detectedElementDisplayFrame else {
-                return
-            }
+        .onChange(of: companionManager.currentPointingTargetIndex) { newIndex in
+            // The pointing sequence advanced (or started). Drive the buddy to the
+            // CURRENT target. Only the screen the target is on animates, so the
+            // single buddy hands off across monitors as the sequence walks.
+            handlePointingTargetIndexChange(newIndex)
+        }
+    }
 
-            // Only navigate if the target is on THIS screen
-            guard screenFrame.contains(CGPoint(x: displayFrame.midX, y: displayFrame.midY))
-                  || displayFrame == screenFrame else {
-                return
-            }
+    /// Reacts to a change in `currentPointingTargetIndex` — a new sequence starting,
+    /// an advance to the next target, or a hand-off to a target on another screen.
+    private func handlePointingTargetIndexChange(_ newIndex: Int?) {
+        guard let index = newIndex,
+              companionManager.detectedElementTargets.indices.contains(index) else {
+            // The index cleared. This is NOT where the fly-back happens — the buddy
+            // is sent back to the cursor from the last target's dwell completion, and
+            // the manager is cleared only AFTER it lands. Nothing to do here.
+            return
+        }
 
-            startNavigatingToElement(screenLocation: screenLocation)
+        let target = companionManager.detectedElementTargets[index]
+        let targetIsOnThisScreen = screenFrame.contains(CGPoint(x: target.displayFrame.midX, y: target.displayFrame.midY))
+            || target.displayFrame == screenFrame
+
+        if targetIsOnThisScreen {
+            startNavigatingToElement(screenLocation: target.screenLocation)
+        } else if buddyNavigationMode != .followingCursor {
+            // The active target moved to a DIFFERENT screen. Release this screen's
+            // buddy (it re-appears on the target's screen) so only one is ever
+            // visible. Local-only reset — the sequence continues over there, so we
+            // must NOT clear the manager's pointing state.
+            resetLocalNavigationState()
         }
     }
 
     /// Whether the buddy triangle should be visible on this screen.
     /// True when cursor is on this screen during normal following, or
-    /// when navigating/pointing at a target on this screen. When another
-    /// screen is navigating (detectedElementScreenLocation is set but this
-    /// screen isn't the one animating), hide the cursor so only one buddy
-    /// is ever visible at a time.
+    /// when navigating/pointing at a target on this screen. When a pointing
+    /// sequence is active on some screen (but this screen isn't the one
+    /// animating), hide the cursor so only one buddy is ever visible at a time.
     private var buddyIsVisibleOnThisScreen: Bool {
         switch buddyNavigationMode {
         case .followingCursor:
-            // If another screen's BlueCursorView is navigating to an element,
-            // hide the cursor on this screen to prevent a duplicate buddy
-            if companionManager.detectedElementScreenLocation != nil {
+            // If a pointing sequence is active (its buddy lives on the current
+            // target's screen), hide the following-cursor buddy everywhere else so
+            // there's never a duplicate.
+            if companionManager.isPointingSequenceActive {
                 return false
             }
             return isCursorOnThisScreen
@@ -528,6 +589,12 @@ struct BlueCursorView: View {
     private func startNavigatingToElement(screenLocation: CGPoint) {
         // Don't interrupt welcome animation
         guard !showWelcome || welcomeText.isEmpty else { return }
+
+        // Cancel any pending dwell/advance from a previous target so navigating to a
+        // new one (the next in the sequence, or a fresh sequence) never overlaps.
+        pointingDwellWorkItem?.cancel()
+        pointingDwellWorkItem = nil
+        navigationAnimationTimer?.invalidate()
 
         // Convert the AppKit screen location to SwiftUI coordinates for this screen
         let targetInSwiftUI = convertScreenPointToSwiftUICoordinates(screenLocation)
@@ -661,15 +728,58 @@ struct BlueCursorView: View {
             ?? "right here!"
 
         streamNavigationBubbleCharacter(phrase: pointerPhrase, characterIndex: 0) {
-            // All characters streamed — hold for 3 seconds, then fly back
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                guard self.buddyNavigationMode == .pointingAtTarget else { return }
-                self.navigationBubbleOpacity = 0.0
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    guard self.buddyNavigationMode == .pointingAtTarget else { return }
-                    self.startFlyingBackToCursor()
-                }
+            // All characters streamed — dwell on this target, then advance to the
+            // next one (or fly back if it was the last).
+            self.schedulePointingDwellThenAdvance()
+        }
+    }
+
+    /// Schedules the per-point dwell, then fades the bubble and advances the
+    /// sequence (or flies the buddy back to the cursor after the last target).
+    ///
+    /// The dwell is held in `pointingDwellWorkItem` so a new navigation can cancel
+    /// it cleanly. FORWARD-COMPAT: the audio-sync stage will replace this timer with
+    /// a scheduled advance at the element's spoken word time — the advance itself
+    /// (`advanceOrReturnAfterPointing`) is a separate step, unchanged by that swap.
+    private func schedulePointingDwellThenAdvance() {
+        pointingDwellWorkItem?.cancel()
+
+        let dwellWork = DispatchWorkItem { [self] in
+            guard buddyNavigationMode == .pointingAtTarget else { return }
+            navigationBubbleOpacity = 0.0
+
+            let advanceWork = DispatchWorkItem { [self] in
+                guard buddyNavigationMode == .pointingAtTarget else { return }
+                advanceOrReturnAfterPointing()
             }
+            pointingDwellWorkItem = advanceWork
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + Self.pointingBubbleFadeSeconds,
+                execute: advanceWork
+            )
+        }
+        pointingDwellWorkItem = dwellWork
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.perPointDwellSeconds,
+            execute: dwellWork
+        )
+    }
+
+    /// The CALLABLE ADVANCE STEP: after dwelling on the current target, either move
+    /// on to the next target in the sequence or, if this was the last, fly the buddy
+    /// back to the cursor. Kept separate from the dwell timer so the audio-sync stage
+    /// can drive it from a scheduled word time instead.
+    private func advanceOrReturnAfterPointing() {
+        let targetCount = companionManager.detectedElementTargets.count
+        let currentIndex = companionManager.currentPointingTargetIndex ?? (targetCount - 1)
+
+        switch nextPointingSequenceStep(currentIndex: currentIndex, targetCount: targetCount) {
+        case .advance:
+            // Publish the next index — the manager owns the index so every screen's
+            // BlueCursorView observes the same advance and the right one animates.
+            companionManager.advanceToNextPointingTarget()
+        case .returnToCursor:
+            startFlyingBackToCursor()
         }
     }
 
@@ -722,19 +832,18 @@ struct BlueCursorView: View {
 
     /// Cancels an in-progress navigation because the user moved the cursor.
     private func cancelNavigationAndResumeFollowing() {
-        navigationAnimationTimer?.invalidate()
-        navigationAnimationTimer = nil
-        navigationBubbleText = ""
-        navigationBubbleOpacity = 0.0
-        navigationBubbleScale = 1.0
-        buddyFlightScale = 1.0
         finishNavigationAndResumeFollowing()
     }
 
-    /// Returns the buddy to normal cursor-following mode after navigation completes.
-    private func finishNavigationAndResumeFollowing() {
+    /// Resets THIS screen's buddy to cursor-following and tears down its local
+    /// animation state (timers, dwell, bubble) WITHOUT touching the manager's
+    /// pointing sequence. Used when the active target crosses to another monitor, so
+    /// the sequence continues over there while this screen quietly releases its buddy.
+    private func resetLocalNavigationState() {
         navigationAnimationTimer?.invalidate()
         navigationAnimationTimer = nil
+        pointingDwellWorkItem?.cancel()
+        pointingDwellWorkItem = nil
         buddyNavigationMode = .followingCursor
         isReturningToCursor = false
         // Return to the default northwest-pointing angle (-45° + 90° base offset = +45°)
@@ -743,6 +852,13 @@ struct BlueCursorView: View {
         navigationBubbleText = ""
         navigationBubbleOpacity = 0.0
         navigationBubbleScale = 1.0
+    }
+
+    /// Returns the buddy to normal cursor-following mode after the WHOLE sequence
+    /// completes (or is cancelled) and clears the manager's pointing state. Called
+    /// once the buddy has flown back to the cursor after the last target.
+    private func finishNavigationAndResumeFollowing() {
+        resetLocalNavigationState()
         companionManager.clearDetectedElementLocation()
     }
 
