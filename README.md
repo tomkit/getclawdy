@@ -57,16 +57,19 @@ See the [changelog](CHANGELOG.md) for what changed in each version.
 
 ## Requirements
 
-- macOS 14.2 (Sonoma) or later — universal binary (Intel & Apple Silicon)
-- Xcode 16+
-- **At least one of:**
+Everything you need to **run** the downloaded app:
+
+- macOS 14.2 (Sonoma) or later — the download is a universal binary (Intel & Apple Silicon)
+- **At least one coding CLI, installed and signed in:**
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `npm install -g @anthropic-ai/claude-code`, then `claude` (sign in once)
   - [Codex](https://github.com/openai/codex) — `npm install -g @openai/codex`, then `codex login`
 - **Optional — [ElevenLabs](https://elevenlabs.io) API key** for higher-quality voice and audio-synced cursor pointing. Add it in the menu-bar panel (stored in the macOS Keychain); without it, Clawdy automatically uses Apple's built-in on-device text-to-speech — no key required, nothing leaves your Mac.
 
-That's it. No required API keys, no Cloudflare account, no Node Worker. Clawdy auto-detects which CLIs are installed and lets you pick between them in the menu-bar panel.
+That's it. No required API keys, no Cloudflare account, no Node Worker — and **no Xcode**: Xcode is only needed to build from source, not to run the download (see [Build & run](#build--run)). Clawdy auto-detects which CLIs are installed and lets you pick between them in the menu-bar panel.
 
 ## Build & run
+
+Building from source (instead of using the [download](#download)) requires **Xcode 16+**.
 
 ```bash
 open Clawdy.xcodeproj
