@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+*.xcuserdatad/
+build/
+releases/
+
+# Tooling / local agent state
+.claude/
+coding-plans/
+.polly/
+
+# Secrets / local env
+.env
+
+# Review & investigation artifacts (screenshots, working notes) — not source
+evidence/
+.review-proofs/
+*_FINDINGS.md
+SCREEN_RECORDING_REFERENCE.md
