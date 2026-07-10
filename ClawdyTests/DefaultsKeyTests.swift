@@ -31,24 +31,6 @@ struct DefaultsKeyTests {
         #expect(DefaultsKey.elevenLabsVoiceID.rawValue == "elevenLabsVoiceID")
         #expect(DefaultsKey.hasElevenLabsAPIKey.rawValue == "hasElevenLabsAPIKey")
         #expect(DefaultsKey.researchOverlayDragOffset.rawValue == "researchOverlayColumnDragOffset")
-        #expect(DefaultsKey.recordingModeEnabled.rawValue == "recordingModeEnabled")
-    }
-
-    /// The Recording Mode flag round-trips through the typed Bool overloads, and an
-    /// unset key reads false (the default: overlays hidden from external recorders).
-    @Test func recordingModeEnabledRoundTrips() {
-        let defaults = makeIsolatedDefaults()
-        defer { defaults.removeObject(forKey: .recordingModeEnabled) }
-
-        // Never written → false (Recording Mode off, the historical default).
-        #expect(defaults.bool(forKey: .recordingModeEnabled) == false)
-
-        defaults.set(true, forKey: .recordingModeEnabled)
-        #expect(defaults.bool(forKey: .recordingModeEnabled) == true)
-        #expect(defaults.bool(forKey: "recordingModeEnabled") == true)
-
-        defaults.set(false, forKey: .recordingModeEnabled)
-        #expect(defaults.bool(forKey: .recordingModeEnabled) == false)
     }
 
     /// The `CGVector` overloads round-trip through UserDefaults (the research overlay drag

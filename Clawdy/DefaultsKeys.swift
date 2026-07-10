@@ -39,13 +39,6 @@ enum DefaultsKey: String {
     /// secret itself never lives in UserDefaults — only in the Keychain.
     case hasElevenLabsAPIKey = "hasElevenLabsAPIKey"
 
-    /// "Show Clawdy in screen recordings" (Recording Mode). When true, Clawdy's
-    /// on-screen overlays (cursor, annotation strokes, research chrome) are visible
-    /// to EXTERNAL screen recorders. Defaults to false (hidden from capture — the
-    /// historical behavior). Never affects Clawdy's OWN model screenshots, which
-    /// always exclude Clawdy's windows at the application level.
-    case recordingModeEnabled = "recordingModeEnabled"
-
     /// The user's manual drag offset (in screen points) for the upper-left research
     /// overlay cluster — the toast stack AND the idle recents badge share this ONE
     /// offset, so dragging either repositions both. Persisted so a moved position

@@ -14,11 +14,10 @@
 //  All three still share the invariant flags (borderless + non-activating style,
 //  `.statusBar` level, transparent, `hidesOnDeactivate == false`, all-Spaces +
 //  full-screen-auxiliary collection behavior, and excluded from the Windows menu).
-//  `sharingType` is now MODE-AWARE rather than always `.none`: the factory reads the
-//  "Show Clawdy in screen recordings" (Recording Mode) setting at construction, so a
-//  panel is `.none` (hidden from external recorders — the default) when the mode is
-//  off and `.readOnly` (visible to recorders, for demos) when it's on. Tests that
-//  assert a specific value force the mode explicitly via `withRecordingMode`.
+//  `sharingType` is now ALWAYS `.readOnly` — every research overlay panel is visible
+//  to external screen recorders so Clawdy shows up in the user's demos/recordings.
+//  This is safe because the panels never reach Clawdy's OWN model screenshots (the
+//  capture path app-excludes Clawdy regardless of `sharingType`).
 //
 
 import Testing
@@ -34,12 +33,9 @@ struct ResearchOverlayPanelFactoryTests {
     /// these flags. Asserting them once per case proves the parameters only change the
     /// three intended dimensions and nothing else drifted.
     ///
-    /// `sharingType` is NO LONGER an absolute `.none`: it now follows the "Show Clawdy
-    /// in screen recordings" (Recording Mode) setting the factory reads at
-    /// construction. So we compute the expected value from the CURRENT default (which
-    /// each caller sets deterministically) — `.none` when off, `.readOnly` when on —
-    /// and assert against that. The dedicated `overlayPanelSharingTypeFollowsRecordingMode`
-    /// test pins the mapping in both modes explicitly.
+    /// `sharingType` is always `.readOnly` now — every research overlay panel is visible
+    /// to external recorders. (It never reaches Clawdy's own model screenshots, which
+    /// app-exclude Clawdy regardless of `sharingType`.)
     private func assertSharedInvariants(_ panel: NSPanel) {
         #expect(panel.styleMask.contains(.borderless))
         #expect(panel.styleMask.contains(.nonactivatingPanel))
@@ -51,27 +47,8 @@ struct ResearchOverlayPanelFactoryTests {
         #expect(panel.isExcludedFromWindowsMenu == true)
         #expect(panel.collectionBehavior.contains(.canJoinAllSpaces))
         #expect(panel.collectionBehavior.contains(.fullScreenAuxiliary))
-        // Recording-Mode-aware: matches the setting the factory read at construction.
-        let expectedSharingType = RecordingMode.overlaySharingType(
-            recordingEnabled: UserDefaults.standard.bool(forKey: .recordingModeEnabled)
-        )
-        #expect(panel.sharingType == expectedSharingType)
-    }
-
-    /// Runs `body` with the Recording Mode default forced to `enabled`, restoring the
-    /// prior value afterwards so the shared standard domain is never left mutated.
-    private func withRecordingMode(_ enabled: Bool, _ body: () -> Void) {
-        let key = DefaultsKey.recordingModeEnabled
-        let original = UserDefaults.standard.object(forKey: key)
-        UserDefaults.standard.set(enabled, forKey: key)
-        defer {
-            if let original {
-                UserDefaults.standard.set(original, forKey: key.rawValue)
-            } else {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
-        }
-        body()
+        // Always visible to external recorders.
+        #expect(panel.sharingType == .readOnly)
     }
 
     /// DEFAULT (the 5 existing toast/control callers): a plain `NSPanel`, NO shadow,
@@ -116,69 +93,39 @@ struct ResearchOverlayPanelFactoryTests {
         #expect(panel.collectionBehavior.contains(.stationary) == false)
     }
 
-    /// MODE-AWARE sharingType: the factory reads the Recording Mode setting at
-    /// construction, so a panel built while it's OFF is `.none` (hidden from external
-    /// recorders — the default) and one built while it's ON is `.readOnly` (visible to
-    /// recorders for demos). Neither ever affects Clawdy's OWN model screenshots.
-    @Test func overlayPanelSharingTypeFollowsRecordingMode() {
-        withRecordingMode(false) {
-            let offPanel = ResearchToastPanel.makeOverlayPanel(size: size)
-            #expect(offPanel.sharingType == NSWindow.SharingType.none,
-                    "Recording Mode OFF → research overlay panels are hidden from external recorders (.none)")
-        }
-        withRecordingMode(true) {
-            let onPanel = ResearchToastPanel.makeOverlayPanel(size: size)
-            #expect(onPanel.sharingType == .readOnly,
-                    "Recording Mode ON → research overlay panels are visible to external recorders (.readOnly)")
-        }
-        // Toggling back off fully reverts for newly-built panels.
-        withRecordingMode(false) {
-            let revertedPanel = ResearchToastPanel.makeOverlayPanel(size: size)
-            #expect(revertedPanel.sharingType == NSWindow.SharingType.none)
-        }
+    /// The factory ALWAYS produces `.readOnly` panels — visible to external screen
+    /// recorders so Clawdy's research chrome shows up in demos/recordings. (It never
+    /// affects Clawdy's OWN model screenshots, which app-exclude Clawdy regardless.)
+    @Test func overlayPanelIsAlwaysReadOnly() {
+        let panel = ResearchToastPanel.makeOverlayPanel(size: size)
+        #expect(panel.sharingType == .readOnly,
+                "research overlay panels are always visible to external recorders (.readOnly)")
+        // Guard the flip: it must never be back to `.none`.
+        #expect(panel.sharingType != NSWindow.SharingType.none)
     }
 
     /// The live detail panel the stacked overlay actually builds must be a
     /// `KeyableResearchPanel` (via the real render path, not just the factory in
     /// isolation) — so a future change to `makeKeyableDetailPanel` can't silently drop
-    /// the keyable subclass. Its `sharingType` is Recording-Mode-aware, so the
-    /// assertion forces the mode explicitly rather than depending on the ambient
-    /// default: `.none` when off (the default), `.readOnly` when on.
+    /// the keyable subclass. Its `sharingType` is always `.readOnly` (visible to
+    /// recorders) like all research chrome.
     @Test func renderedDetailPanelIsKeyableResearchPanel() {
-        withRecordingMode(false) {
-            let controller = ResearchStackedOverlayController.offscreenForTesting()
-            let viewModel = ResearchProgressOverlayViewModel()
-            viewModel.phase = .running
-            viewModel.taskDescription = "research detail"
-            viewModel.statusLine = "Planning the research…"
-            viewModel.isCancellable = true
-            let pill = ResearchStackPillModel(id: "detail-keyable-off", viewModel: viewModel, isFocused: true)
-            controller.render(pills: [pill], controlRow: nil, detailViewModel: viewModel)
-            defer { controller.hide() }
+        let controller = ResearchStackedOverlayController.offscreenForTesting()
+        let viewModel = ResearchProgressOverlayViewModel()
+        viewModel.phase = .running
+        viewModel.taskDescription = "research detail"
+        viewModel.statusLine = "Planning the research…"
+        viewModel.isCancellable = true
+        let pill = ResearchStackPillModel(id: "detail-keyable", viewModel: viewModel, isFocused: true)
+        controller.render(pills: [pill], controlRow: nil, detailViewModel: viewModel)
+        defer { controller.hide() }
 
-            let detailPanel = controller.detailPanelForTesting
-            #expect(detailPanel is KeyableResearchPanel,
-                    "the chat detail panel must be a KeyableResearchPanel so its text input can accept typing")
-            #expect(detailPanel?.hasShadow == false)
-            #expect(detailPanel?.collectionBehavior.contains(.stationary) == true)
-            #expect(detailPanel?.sharingType == NSWindow.SharingType.none,
-                    "Recording Mode OFF → the rendered detail panel is hidden from recorders (.none)")
-        }
-
-        // Recording Mode ON → the same rendered detail panel is visible to recorders.
-        withRecordingMode(true) {
-            let controller = ResearchStackedOverlayController.offscreenForTesting()
-            let viewModel = ResearchProgressOverlayViewModel()
-            viewModel.phase = .running
-            viewModel.taskDescription = "research detail"
-            viewModel.statusLine = "Planning the research…"
-            viewModel.isCancellable = true
-            let pill = ResearchStackPillModel(id: "detail-keyable-on", viewModel: viewModel, isFocused: true)
-            controller.render(pills: [pill], controlRow: nil, detailViewModel: viewModel)
-            defer { controller.hide() }
-
-            #expect(controller.detailPanelForTesting?.sharingType == .readOnly,
-                    "Recording Mode ON → the rendered detail panel is visible to recorders (.readOnly)")
-        }
+        let detailPanel = controller.detailPanelForTesting
+        #expect(detailPanel is KeyableResearchPanel,
+                "the chat detail panel must be a KeyableResearchPanel so its text input can accept typing")
+        #expect(detailPanel?.hasShadow == false)
+        #expect(detailPanel?.collectionBehavior.contains(.stationary) == true)
+        #expect(detailPanel?.sharingType == .readOnly,
+                "the rendered detail panel is visible to recorders (.readOnly)")
     }
 }

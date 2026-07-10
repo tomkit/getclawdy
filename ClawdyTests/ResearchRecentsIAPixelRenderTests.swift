@@ -14,8 +14,9 @@
 //  of the OLD view code (kind pill + status dot + status word + timestamp + two labelled
 //  buttons, per-row card) — it is test-only scaffolding, never shipped.
 //
-//  The overlay panels are `sharingType = .none` (non-capturable), so an external
-//  screencapture can't grab them; `cacheDisplay` rasterizes the true SwiftUI tree regardless.
+//  The overlay panels are `sharingType = .readOnly` (visible to external recorders), so a
+//  live screencapture is not a reliable pixel source here; `cacheDisplay` rasterizes the
+//  true SwiftUI tree regardless.
 //
 
 import Testing

@@ -4,8 +4,9 @@
 //
 //  RUNTIME pixel verification that the research overlay toasts render on the app's DARK
 //  window surface (`surface1`) with a HARD edge (no alpha halo) — the revert of the
-//  short-lived Clawdy-blue overlay direction. The overlay panels are `sharingType = .none`
-//  (non-capturable by design), so an external screencapture can't grab them; instead these
+//  short-lived Clawdy-blue overlay direction. The overlay panels are `sharingType =
+//  .readOnly` (visible to external recorders), so a live screencapture of them is not a
+//  reliable pixel source here; instead these
 //  render the ACTUAL overlay SwiftUI views through a real `NSHostingView` +
 //  `cacheDisplay(in:to:)`, which rasterizes the true AppKit/SwiftUI view tree unaffected by
 //  the window's sharing type. The rendered pixels are then inspected:

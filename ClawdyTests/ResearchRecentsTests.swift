@@ -354,8 +354,10 @@ struct ResearchRecentsBadgeWindowTests {
         #expect(panel != nil)
         #expect((panel?.frame.width ?? 0) > 0)
         #expect((panel?.frame.height ?? 0) > 0)
-        // sharingType = .none so the badge never leaks into a captured screenshot.
-        #expect(panel?.sharingType == NSWindow.SharingType.none)
+        // sharingType = .readOnly so the badge is visible to external recorders. It is
+        // kept out of Clawdy's OWN model screenshots by app-level exclusion, not by
+        // sharingType.
+        #expect(panel?.sharingType == .readOnly)
 
         controller.hide()
         #expect(controller.badgePanelForTesting == nil)

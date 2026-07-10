@@ -377,7 +377,7 @@ struct ResearchToastWindowHoverTests {
         #expect(panel?.isOpaque == false, "the toast window is non-opaque")
         #expect(panel?.backgroundColor == NSColor.clear, "the toast window background is fully clear")
         #expect(panel?.hasShadow == false, "the toast window draws no shadow (the aura is the SwiftUI glow, not a window shadow)")
-        #expect(panel?.sharingType == NSWindow.SharingType.none, "the toast window stays excluded from screenshots")
+        #expect(panel?.sharingType == .readOnly, "the toast window is visible to external recorders (.readOnly); it is kept out of Clawdy's own model screenshots by app-level exclusion, not sharingType")
     }
 
     /// FEWER than 3 active toasts never stack — the cluster is a plain list, and hovering a

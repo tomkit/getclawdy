@@ -40,8 +40,10 @@
 //
 //  The vertical stack still collapses beyond `maximumVisiblePills` to a "+N more" /
 //  "show less" control (its own small panel). The focused session's read-only detail
-//  panel is shown beside the column. Every window here is `sharingType = .none` and has
-//  an EXPLICIT non-zero frame (never a fitting-size race).
+//  panel is shown beside the column. Every window here is `sharingType = .readOnly`
+//  (visible to external recorders; kept out of Clawdy's own model screenshots by
+//  app-level exclusion, not sharingType) and has an EXPLICIT non-zero frame (never a
+//  fitting-size race).
 //
 
 import AppKit
@@ -759,38 +761,15 @@ final class ResearchToastPanel {
         }
         panel.collectionBehavior = collectionBehavior
         panel.isExcludedFromWindowsMenu = true
-        // Whether this research overlay panel is visible to EXTERNAL screen
-        // recorders is governed by the "Show Clawdy in screen recordings"
-        // (Recording Mode) setting — `.readOnly` when on, `.none` when off (the
-        // default). It NEVER leaks into Clawdy's OWN model screenshots, which
-        // exclude all Clawdy windows at the application level regardless of this
-        // `sharingType`. New panels read the setting here; a live toggle reassigns
-        // it on already-on-screen panels via `applyRecordingModeToLivePanels`.
-        panel.sharingType = RecordingMode.overlaySharingType(
-            recordingEnabled: UserDefaults.standard.bool(forKey: .recordingModeEnabled)
-        )
-        liveOverlayPanels.add(panel)
+        // This research overlay panel is ALWAYS `.readOnly` — VISIBLE to external
+        // screen recorders (QuickTime/OBS/ScreenCaptureKit) so Clawdy's research
+        // chrome (toasts, badge, +N control, clarification, detail) shows up in the
+        // user's demos/recordings. It NEVER leaks into Clawdy's OWN model
+        // screenshots, which exclude all Clawdy windows at the application level
+        // regardless of this `sharingType`. (The results window is created elsewhere
+        // and stays `.readOnly`; the menu-bar panel stays `.none`.)
+        panel.sharingType = .readOnly
         return panel
-    }
-
-    /// Weakly tracks every research-overlay panel created via `makeOverlayPanel`
-    /// (toasts, badge, +N control, clarification, detail) so a Recording Mode
-    /// toggle can reassign their `sharingType` without a relaunch. Weak references
-    /// so closed panels drop out automatically and are never resurrected. The
-    /// results window is NOT created here (it stays `.readOnly` on its own), and
-    /// the menu-bar panel is created elsewhere and stays `.none`.
-    private static let liveOverlayPanels = NSHashTable<NSPanel>.weakObjects()
-
-    /// Reassigns `sharingType` on every live research-overlay panel when the
-    /// "Show Clawdy in screen recordings" (Recording Mode) setting changes, so the
-    /// research chrome becomes visible-to-recorders (or hidden again) WITHOUT a
-    /// relaunch. `sharingType` is mutable on a live NSPanel, so this fully reverts
-    /// when toggled back off.
-    static func applyRecordingModeToLivePanels(recordingEnabled: Bool) {
-        let sharingType = RecordingMode.overlaySharingType(recordingEnabled: recordingEnabled)
-        for panel in liveOverlayPanels.allObjects {
-            panel.sharingType = sharingType
-        }
     }
 
     // MARK: - Test hooks
@@ -1152,7 +1131,7 @@ final class ResearchStackedOverlayController {
     /// The "collapse back to the stack" control, shown only while fanned out.
     private var collapseControlPanel: ResearchStackCollapseControlPanel?
     /// The per-session chat detail panel. It is a KEYABLE panel (unlike the click-through
-    /// toast windows) so its text input can accept typing, and stays `sharingType = .none`.
+    /// toast windows) so its text input can accept typing, and stays `sharingType = .readOnly`.
     private var detailPanel: KeyableResearchPanel?
     /// The view model currently driving the detail panel (the focused session's), so we
     /// only rebuild the hosting view when the focused session actually changes.

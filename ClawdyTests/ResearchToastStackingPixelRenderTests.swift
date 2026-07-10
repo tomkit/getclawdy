@@ -12,7 +12,7 @@
 //   (b) the same cluster FANNED OUT into the full vertical list (every toast full-size).
 //   (c) the cluster RE-STACKED (back to the compact stack).
 //
-//  The overlay's real windows are `sharingType = .none` (non-capturable) and animate
+//  The overlay's real windows are `sharingType = .readOnly` (visible to recorders) and animate
 //  asynchronously, so — like the other overlay pixel tests — these rasterize the ACTUAL
 //  SwiftUI view tree (the real `ResearchFullToastView` + `clawdyGlow` + the real pure
 //  stacked transforms) through a real `NSHostingView` + `cacheDisplay`. Each render is

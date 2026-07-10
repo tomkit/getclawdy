@@ -79,17 +79,14 @@ class OverlayWindow: NSWindow {
         self.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         self.isReleasedWhenClosed = false
         self.hasShadow = false
-        // Whether this cursor/annotation/thinking-cue overlay is visible to
-        // EXTERNAL screen recorders is governed by the "Show Clawdy in screen
-        // recordings" (Recording Mode) setting — `.readOnly` when on, `.none` when
-        // off (the default). Either way it NEVER leaks into Clawdy's OWN model
-        // screenshots: those exclude all Clawdy windows at the application level
-        // (`CompanionScreenCaptureUtility`), independent of this `sharingType`.
-        // New windows read the setting here at construction; a live toggle
-        // reassigns it via `OverlayWindowManager.applyRecordingModeSharingType`.
-        self.sharingType = RecordingMode.overlaySharingType(
-            recordingEnabled: UserDefaults.standard.bool(forKey: .recordingModeEnabled)
-        )
+        // This cursor / annotation / thinking-cue overlay is ALWAYS `.readOnly` —
+        // VISIBLE to external screen recorders (QuickTime/OBS/ScreenCaptureKit) so
+        // Clawdy shows up in the user's demos/recordings. It NEVER leaks into
+        // Clawdy's OWN model screenshots: those exclude all Clawdy windows at the
+        // application level (`CompanionScreenCaptureUtility`), independent of this
+        // `sharingType`, so annotation strokes still appear exactly once (from the
+        // software compositor) and the model's view is unchanged.
+        self.sharingType = .readOnly
 
         // Important: Allow the window to appear even when app is not active
         self.hidesOnDeactivate = false
@@ -484,7 +481,8 @@ struct BlueCursorView: View {
             // with no audio/answer yet, so a slow turn doesn't feel dead. Purely
             // cosmetic: the request keeps running, and this hides the instant the
             // first audio/answer arrives or the turn ends. It lives in this overlay
-            // window (sharingType = .none) so it never leaks into the screenshots.
+            // window (sharingType = .readOnly — visible to recorders) but is kept out
+            // of Clawdy's OWN model screenshots by app-level exclusion, not sharingType.
             if isCursorOnThisScreen && companionManager.isShowingThinkingCue {
                 BlueCursorThinkingCueView()
                     .position(x: cursorPosition.x + 10 + (thinkingCueBubbleWidth / 2), y: cursorPosition.y + 18)
@@ -1102,20 +1100,6 @@ private struct BlueCursorThinkingCueView: View {
 class OverlayWindowManager {
     private var overlayWindows: [OverlayWindow] = []
     var hasShownOverlayBefore = false
-
-    /// Reassigns `sharingType` on the currently-live overlay windows when the
-    /// "Show Clawdy in screen recordings" (Recording Mode) setting changes, so the
-    /// cursor / annotation / thinking-cue overlay becomes visible-to-recorders (or
-    /// hidden again) WITHOUT a relaunch. `sharingType` is mutable on a live
-    /// NSWindow, so this fully reverts when toggled back off. New overlay windows
-    /// read the setting at construction, so this only touches ones already on
-    /// screen.
-    func applyRecordingModeSharingType(recordingEnabled: Bool) {
-        let sharingType = RecordingMode.overlaySharingType(recordingEnabled: recordingEnabled)
-        for window in overlayWindows {
-            window.sharingType = sharingType
-        }
-    }
 
     // MARK: - Annotation mode
 

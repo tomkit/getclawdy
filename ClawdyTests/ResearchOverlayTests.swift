@@ -15,8 +15,9 @@
 //      presented with a NON-ZERO explicit frame (the exact failure of the old
 //      cursor-following overlay, which collapsed to a 0×0 fitting-size frame and
 //      was ordered on screen invisibly), at the right window level / collection
-//      behavior, and — critically — with `sharingType = .none` so it never leaks
-//      into a research screenshot. Also drives the click-to-detail, the stop
+//      behavior, and — critically — with `sharingType = .readOnly` (visible to
+//      external recorders; kept out of Clawdy's own model screenshots by app-level
+//      exclusion, not sharingType). Also drives the click-to-detail, the stop
 //      wiring, and the done → view-results affordance.
 //
 
@@ -280,8 +281,10 @@ struct ResearchStackedOverlayControllerTests {
         #expect(toast.collectionBehavior.contains(.fullScreenAuxiliary))
         // Must receive clicks (Stop / tap-to-focus), so NOT click-through.
         #expect(toast.ignoresMouseEvents == false)
-        // Must never leak into a research screenshot.
-        #expect(toast.sharingType == .none)
+        // Visible to external recorders (.readOnly). It is kept out of Clawdy's OWN
+        // model screenshots by app-level exclusion in CompanionScreenCaptureUtility,
+        // not by sharingType.
+        #expect(toast.sharingType == .readOnly)
 
         #expect(controller.renderedPillCountForTesting == 1)
         #expect(controller.toastPanelCountForTesting == 1)
@@ -313,13 +316,14 @@ struct ResearchStackedOverlayControllerTests {
             }
             #expect(toast.isVisible == true)
             #expect(toast.frame.width > 0 && toast.frame.height > 0)
-            #expect(toast.sharingType == .none)
+            #expect(toast.sharingType == .readOnly)
         }
-        // The "+N more" control is its own visible, non-zero, screenshot-excluded window.
+        // The "+N more" control is its own visible, non-zero window, `.readOnly`
+        // (visible to recorders; kept out of the model screenshot by app-exclusion).
         let control = controller.controlPanelForTesting
         #expect(control?.isVisible == true)
         #expect((control?.frame.width ?? 0) > 0 && (control?.frame.height ?? 0) > 0)
-        #expect(control?.sharingType == NSWindow.SharingType.none)
+        #expect(control?.sharingType == .readOnly)
     }
 
     /// BLOCKING 1 presentation: an EXPANDED stack still renders a control window (the
@@ -362,7 +366,7 @@ struct ResearchStackedOverlayControllerTests {
         #expect(detail.isVisible == true)
         #expect(detail.frame.width > 0)
         #expect(detail.frame.height > 0)
-        #expect(detail.sharingType == .none)
+        #expect(detail.sharingType == .readOnly)
     }
 
     /// Clearing focus (detailViewModel nil) hides the detail panel while the stack

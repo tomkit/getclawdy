@@ -171,15 +171,6 @@ struct CompanionPanelView: View {
                 }
                 settingsSection(for: section)
             }
-
-            // A final "General" group holding the Recording Mode toggle. It sits
-            // outside the pure `CompanionSettingsLayout` sections (Engine / Voice)
-            // because it's engine-agnostic app chrome, not a coach/voice setting.
-            sectionDivider
-            VStack(alignment: .leading, spacing: 12) {
-                sectionHeader("General")
-                recordingModeToggleRow
-            }
         }
     }
 
@@ -791,47 +782,6 @@ struct CompanionPanelView: View {
             Toggle("", isOn: Binding(
                 get: { companionManager.useClaudeCustomizations },
                 set: { companionManager.setUseClaudeCustomizations($0) }
-            ))
-            .toggleStyle(.switch)
-            .labelsHidden()
-            .tint(DS.Colors.accent)
-            .scaleEffect(0.8)
-        }
-        .menuRowHover()
-    }
-
-    // MARK: - Recording Mode Toggle
-
-    /// The "Show Clawdy in screen recordings" setting: when ON, Clawdy's overlays
-    /// (cursor + annotation strokes + research chrome) become visible to external
-    /// screen recorders for demos; when OFF (the default) they stay invisible to
-    /// capture. Clawdy's own model screenshots never contain the overlays in either
-    /// mode. Two-line row (title + helper subtitle) matching the settings styling.
-    private var recordingModeToggleRow: some View {
-        HStack(alignment: .top) {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "record.circle")
-                    .font(DS.Font.overlayBody)
-                    .foregroundColor(DS.Colors.textTertiary)
-                    .frame(width: 16)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Show Clawdy in screen recordings")
-                        .font(DS.Font.detailBody)
-                        .foregroundColor(DS.Colors.textSecondary)
-
-                    Text("Makes the cursor and annotations visible to screen recorders (for demos).")
-                        .font(DS.Font.overlayCaptionRegular)
-                        .foregroundColor(DS.Colors.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            Spacer()
-
-            Toggle("", isOn: Binding(
-                get: { companionManager.isRecordingModeEnabled },
-                set: { companionManager.setRecordingModeEnabled($0) }
             ))
             .toggleStyle(.switch)
             .labelsHidden()
