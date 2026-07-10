@@ -738,6 +738,10 @@ final class ResearchRecentsBadgeController {
     /// laid-out origin, accumulate that into the shared column offset (clamped so the badge
     /// stays on screen), and report the new offset up to the manager.
     @objc private func handleBadgeWindowMoved(_ notification: Notification) {
+        // BY DESIGN: a drag STARTED during a badge grow/collapse animation (while our own
+        // frames are in flight) is dropped here rather than recorded, so an animation's
+        // intermediate frames can never be mistaken for a user drag. The cost is only that a
+        // drag begun in that brief window may snap back; the user simply drags again.
         guard programmaticFrameChangeDepth == 0 else { return }
         guard let movedWindow = notification.object as? NSWindow, movedWindow === badgePanel else { return }
         guard let rawVisibleFrame = NSScreen.main?.visibleFrame else { return }

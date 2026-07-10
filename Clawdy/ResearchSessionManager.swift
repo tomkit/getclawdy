@@ -202,9 +202,23 @@ final class ResearchSessionManager: ObservableObject {
         recentsResultsWindow.testAnchorOriginOffset = testAnchorOriginOffset
         stackedOverlay.onToggleExpandRequested = { [weak self] in self?.toggleStackExpansion() }
 
-        // Seed BOTH cluster surfaces with the restored drag offset (before the init-time
-        // `refreshOverlay()` below lays them out), and wire each one's live-drag report to the
-        // single central handler that persists + syncs the move to both.
+        // HEAL the restored offset against the CURRENT display before applying it: a value
+        // saved on a larger / since-removed display (docked → undocked) or a corrupted
+        // default could otherwise relaunch the cluster fully off-screen. Reuse the SAME pure
+        // clamp a live drag uses (via the toast controller, whose `testAnchorOriginOffset` is
+        // already set above), and PERSIST any correction so it self-heals on disk.
+        let clampedRestoredOffset = stackedOverlay.clampOffsetToCurrentScreen(overlayColumnDragOffset)
+        if clampedRestoredOffset != overlayColumnDragOffset {
+            overlayColumnDragOffset = clampedRestoredOffset
+            // `didSet` observers do NOT fire for assignments made inside `init`, so persist the
+            // corrected value explicitly here (later live drags outside init self-persist via
+            // `didSet`). Without this the on-disk value would stay stale and never self-heal.
+            userDefaults.set(clampedRestoredOffset, forKey: .researchOverlayDragOffset)
+        }
+
+        // Seed BOTH cluster surfaces with the (healed) restored drag offset (before the
+        // init-time `refreshOverlay()` below lays them out), and wire each one's live-drag
+        // report to the single central handler that persists + syncs the move to both.
         stackedOverlay.applyUserColumnDragOffset(overlayColumnDragOffset)
         recentsBadge.applyUserColumnDragOffset(overlayColumnDragOffset)
         stackedOverlay.onUserColumnDragged = { [weak self] newOffset in self?.handleOverlayColumnDragged(newOffset) }

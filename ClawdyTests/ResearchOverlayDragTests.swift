@@ -181,4 +181,31 @@ struct ResearchOverlayDragPersistenceTests {
         #expect(stillPersisted?.dx == savedOffset.dx)
         #expect(stillPersisted?.dy == savedOffset.dy)
     }
+
+    /// A STALE / OVERSIZED persisted offset — e.g. saved on a larger display that's since been
+    /// removed, or a corrupted default — is CLAMPED to the current visible frame on restore so
+    /// the cluster can never relaunch off-screen, and the corrected value is re-persisted so it
+    /// self-heals on disk.
+    @Test func aStaleOversizedRestoredOffsetIsClampedAndReHealedOnRestore() {
+        let userDefaults = makeTempDefaults()
+        // Absurdly large offset that would push the pill far off any real display.
+        let staleOffset = CGVector(dx: 500_000, dy: -500_000)
+        userDefaults.set(staleOffset, forKey: .researchOverlayDragOffset)
+
+        let manager = makeManager(userDefaults: userDefaults)
+        defer { manager.stopAll() }
+
+        // The applied offset is the SAME value the live-drag clamp would produce for the stale
+        // input against the current screen — proving restore reused the shared clamp, not the
+        // raw stale value.
+        let expectedClamped = manager.stackedOverlayForTesting.clampOffsetToCurrentScreen(staleOffset)
+        #expect(expectedClamped != staleOffset, "an absurd offset must actually be clamped")
+        #expect(manager.stackedOverlayForTesting.userColumnDragOffsetForTesting == expectedClamped)
+        #expect(manager.recentsBadgeControllerForTesting.userColumnDragOffsetForTesting == expectedClamped)
+
+        // The correction was PERSISTED back (self-heal) — the stale value is gone from disk.
+        let persisted = userDefaults.vector(forKey: .researchOverlayDragOffset)
+        #expect(persisted?.dx == expectedClamped.dx)
+        #expect(persisted?.dy == expectedClamped.dy)
+    }
 }

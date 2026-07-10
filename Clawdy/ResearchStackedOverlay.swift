@@ -1421,6 +1421,12 @@ final class ResearchStackedOverlayController {
     /// laid-out origin, accumulate that into the shared column offset (clamped so the pill
     /// stays on screen), and report the new offset up to the manager.
     @objc private func handleToastWindowMoved(_ notification: Notification) {
+        // BY DESIGN: a drag STARTED during a fan-out/collapse animation (while our own frames
+        // are in flight) is dropped here rather than recorded, so an animation's intermediate
+        // frames can never be mistaken for a user drag. The cost is only that a drag begun in
+        // that brief (~0.25s) window may snap back; the user simply drags again. Accepting a
+        // move mid-animation would require distinguishing it from our own animated frames,
+        // which is exactly the ambiguity this guard exists to avoid — not worth destabilizing.
         guard programmaticFrameChangeDepth == 0 else { return }
         guard let movedWindow = notification.object as? NSWindow else { return }
         guard let movedEntry = toastPanelsByID.first(where: { $0.value.panel === movedWindow }) else { return }
@@ -1469,6 +1475,24 @@ final class ResearchStackedOverlayController {
     func applyUserColumnDragOffset(_ offset: CGVector) {
         userColumnDragOffset = offset
         layoutAllPanels(animated: false)
+    }
+
+    /// Clamps a CANDIDATE shared offset against the CURRENT display so the top anchor toast
+    /// pill stays fully on screen, reusing the SAME pure `ResearchOverlayDragOffset.clamp`
+    /// (and the SAME base pill rect + clamp frame) a live drag uses. Used at RESTORE time to
+    /// heal a persisted offset saved on a larger / now-removed display (or a corrupted value)
+    /// so a relaunch can never place the cluster off-screen. Presentation-independent because
+    /// the index-0 slot origin is the same for every stride, so it's valid before any render.
+    /// Returns the offset unchanged when no screen is available (nothing to clamp against).
+    func clampOffsetToCurrentScreen(_ offset: CGVector) -> CGVector {
+        guard let rawVisibleFrame = NSScreen.main?.visibleFrame,
+              let basePillScreenRect = baseAnchorPillScreenRect(presentation: .list) else { return offset }
+        let clampVisibleFrame = rawVisibleFrame.offsetBy(dx: testAnchorOriginOffset.dx, dy: testAnchorOriginOffset.dy)
+        return ResearchOverlayDragOffset.clamp(
+            offset,
+            basePillScreenRect: basePillScreenRect,
+            visibleFrame: clampVisibleFrame
+        )
     }
 
     // MARK: - Native-stack fan-out hover
