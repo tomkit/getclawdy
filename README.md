@@ -1,19 +1,42 @@
-# Clawdy
+<p align="center">
+  <img src="assets/clawdy-logo.png" width="120" alt="Clawdy" />
+</p>
+
+<h1 align="center">Clawdy</h1>
 
 Clawdy is a free, fully-local Mac menu bar buddy that lives next to your cursor. It can see your screen, talk to you, and point at stuff — like a teacher sitting next to you.
 
-The twist: **Clawdy runs entirely on your own Claude Code or Codex CLI subscription.** There's no Cloudflare Worker, no API keys, no metering, and nothing sensitive in the app. When you talk to Clawdy, it shells out to the `claude` or `codex` CLI already installed and signed in on your machine, so responses are billed to *your* existing subscription.
+The twist: **Clawdy runs entirely on your own Claude Code or Codex CLI subscription.** There's no Cloudflare Worker, no model API keys, no metering, and nothing sensitive in the app. When you talk to Clawdy, it shells out to the `claude` or `codex` CLI already installed and signed in on your machine, so responses are billed to *your* existing subscription.
 
-Voice is local too: speech-to-text uses Apple's on-device Speech framework, and text-to-speech uses the built-in `AVSpeechSynthesizer`. Nothing leaves your Mac except the CLI's own model call.
+Voice is local by default: speech-to-text uses Apple's on-device Speech framework, and text-to-speech uses the built-in `AVSpeechSynthesizer` — no API key, nothing leaves your Mac except the CLI's own model call. Optionally, bring your own **ElevenLabs API key** for higher-quality voice and audio-synced cursor pointing; if it isn't set (or a request fails), Clawdy falls back to Apple's built-in TTS automatically.
+
+<p align="center">
+  <a href="https://github.com/tomkit/getclawdy/releases/latest/download/Clawdy.dmg">
+    <img src="assets/download-mac.png" width="210" alt="Download Clawdy for macOS" />
+  </a>
+</p>
+
+**Point at your screen and talk** — Clawdy answers out loud and the claw flies to what it means.
+
+![Clawdy planning a coastal route in Aomori](assets/demo-route.gif)
+
+**Ask a big question** — Clawdy researches the web and builds you a page.
+
+![Clawdy researching things to do in Aomori](assets/demo-research.gif)
+
+**Explore an area** — circle a spot and Clawdy walks you through what's around.
+
+![Clawdy pointing out places of interest in Aomori](assets/demo-poi.gif)
 
 ## Download
 
 The easiest way to run Clawdy is the signed, notarized build:
 
-1. Download **`Clawdy.dmg`** from the [latest release](https://github.com/tomkit/getclawdy/releases/latest).
-2. Open the DMG and drag **Clawdy** into **Applications**.
-3. Launch Clawdy, then grant **Screen Recording**, **Accessibility**, and **Microphone** when prompted (and relaunch).
-4. Make sure the `claude` or `codex` CLI is installed and signed in (see [Requirements](#requirements)).
+**[⬇ Download Clawdy.dmg](https://github.com/tomkit/getclawdy/releases/latest/download/Clawdy.dmg)** — universal (Intel & Apple Silicon), signed and notarized.
+
+1. Open the DMG and drag **Clawdy** into **Applications**.
+2. Launch Clawdy, then grant **Screen Recording**, **Accessibility**, and **Microphone** when prompted (and relaunch).
+3. Make sure the `claude` or `codex` CLI is installed and signed in (see [Requirements](#requirements)).
 
 The build is a single universal binary (Intel & Apple Silicon), signed with a Developer ID certificate and notarized by Apple, so it opens without Gatekeeper warnings. Verify your download against the `SHA256SUMS` attached to each release:
 
@@ -40,7 +63,7 @@ See the [changelog](CHANGELOG.md) for what changed in each version.
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `npm install -g @anthropic-ai/claude-code`, then `claude` (sign in once)
   - [Codex](https://github.com/openai/codex) — `npm install -g @openai/codex`, then `codex login`
 
-That's it. No API keys, no Cloudflare account, no Node Worker. Clawdy auto-detects which CLIs are installed and lets you pick between them in the menu-bar panel.
+That's it. No required API keys, no Cloudflare account, no Node Worker. Clawdy auto-detects which CLIs are installed and lets you pick between them in the menu-bar panel.
 
 ## Build & run
 
@@ -118,5 +141,3 @@ AGENTS.md / CLAUDE.md        # Full architecture doc (agents read this)
 ## License
 
 Clawdy's own source is licensed under the **MIT License** (see `LICENSE` and `NOTICE`). Third-party components bundled in the app are listed in `THIRD-PARTY-LICENSES.md`.
-
-The client in this repository is free and permissively licensed (MIT) — bring your own Claude Code or Codex CLI and it is yours to use, modify, and self-host. A future managed/hosted tier (run against our own provider accounts, no CLI required) is planned separately under a source-available license (Fair Source / FSL); that license will ship with the hosted component if and when it is added. The client in this repository stays MIT.
