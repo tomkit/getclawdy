@@ -12,7 +12,7 @@ Voice is local by default: speech-to-text uses Apple's on-device Speech framewor
 
 <p align="center">
   <a href="https://github.com/tomkit/getclawdy/releases/latest/download/Clawdy.dmg">
-    <img src="assets/download-mac.png" width="210" alt="Download Clawdy for macOS" />
+    <img src="assets/download-mac.png" width="230" alt="Download Clawdy for macOS" />
   </a>
 </p>
 
@@ -49,11 +49,11 @@ See the [changelog](CHANGELOG.md) for what changed in each version.
 ## How it works
 
 1. Hold **Control + Option** to talk (push-to-talk). Audio is transcribed on-device with Apple Speech.
-2. On release, Clawdy captures a screenshot of each connected display (downscaled to ≤1280px, one JPEG per screen, only when you press the hotkey — never continuously).
+2. On release, Clawdy captures a screenshot of each connected display (downscaled to ≤800px, one JPEG per screen, only when you press the hotkey — never continuously).
 3. The transcript + screenshots + a coaching system prompt are handed to your selected engine:
    - **Claude Code** → the `claude` CLI in headless print mode.
    - **Codex** → the `codex` CLI in non-interactive `exec` mode.
-4. The model's reply is streamed back, spoken aloud via local TTS, and — if the model emitted a `[POINT:x,y:label:screenN]` tag — the claw cursor flies to that on-screen element.
+4. The model's reply is streamed back, spoken aloud, and — if it emitted `[POINT:x,y:label:screenN]` tags — the claw cursor walks to each on-screen element it names and labels it. With an ElevenLabs key the moves are timed to the audio and arrive a beat before each place is spoken; otherwise the claw visits them in order.
 
 ## Requirements
 
@@ -62,6 +62,7 @@ See the [changelog](CHANGELOG.md) for what changed in each version.
 - **At least one of:**
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `npm install -g @anthropic-ai/claude-code`, then `claude` (sign in once)
   - [Codex](https://github.com/openai/codex) — `npm install -g @openai/codex`, then `codex login`
+- **Optional — [ElevenLabs](https://elevenlabs.io) API key** for higher-quality voice and audio-synced cursor pointing. Add it in the menu-bar panel (stored in the macOS Keychain); without it, Clawdy automatically uses Apple's built-in on-device text-to-speech — no key required, nothing leaves your Mac.
 
 That's it. No required API keys, no Cloudflare account, no Node Worker. Clawdy auto-detects which CLIs are installed and lets you pick between them in the menu-bar panel.
 
@@ -86,57 +87,6 @@ The app appears in your menu bar (no dock icon). Click the icon, grant the permi
 - **Screen Recording** / **Screen Content** — screenshots when you press the hotkey
 
 The app is intentionally **not sandboxed** (`com.apple.security.app-sandbox = false`) because it shells out to your CLI binaries and captures the screen.
-
-## The exact CLI invocations
-
-Clawdy builds these command lines (working directory = a private per-request temp dir holding only the screenshots):
-
-**Claude Code** (`ClaudeCodeEngine`):
-```
-claude -p "<prompt>" \
-  --append-system-prompt "<coaching system prompt>" \
-  --allowedTools Read \
-  --add-dir "<temp dir>" \
-  --output-format stream-json --verbose --include-partial-messages
-```
-The prompt lists each screenshot file and asks Claude to `Read` them; `--allowedTools Read` + `--add-dir` grant read-only access to just the temp dir so the tool call runs without an interactive permission prompt. Streamed `text_delta` events drive progressive UI; the final `result` event is the authoritative answer.
-
-**Codex** (`CodexEngine`):
-```
-codex exec --skip-git-repo-check -s read-only -C "<temp dir>" --json \
-  -i "<temp dir>/screen1.jpg" [-i "<temp dir>/screen2.jpg" ...] -
-```
-The prompt (with the coaching system prompt folded in, since `codex exec` has no system-prompt flag) is fed on **stdin** via the trailing `-`. Images are attached natively with `-i` so the model sees them directly. The final answer is the `agent_message` item in the `--json` stream.
-
-Both engines resolve their binary via PATH plus common install locations (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, every `~/.nvm/versions/node/*/bin`) because a Finder-launched app inherits a minimal PATH.
-
-## Architecture
-
-**Menu bar app** (no dock icon) with two `NSPanel` windows — one for the control panel dropdown, one for the full-screen transparent cursor overlay. The push-to-talk pipeline records audio, transcribes it on-device, captures screenshots, and hands everything to a `CoachEngine`. `CoachEngine` is a protocol; `ClaudeCodeEngine` and `CodexEngine` are the two CLI-backed implementations, selected at runtime based on what's installed. The model can embed `[POINT:x,y:label:screenN]` tags to make the cursor fly to specific UI elements across monitors.
-
-Full technical breakdown lives in `AGENTS.md` (aliased as `CLAUDE.md`).
-
-## Project structure
-
-```
-Clawdy/                      # Swift source
-  CompanionManager.swift       # Central state machine
-  CompanionPanelView.swift     # Menu bar panel UI (engine picker)
-  CoachEngine.swift            # Engine protocol + kinds + detection types
-  CoachEngineRegistry.swift    # Detects installed CLIs, builds engines
-  ClaudeCodeEngine.swift       # `claude` CLI engine
-  CodexEngine.swift            # `codex` CLI engine
-  CLIBinaryResolver.swift      # PATH / install-location binary resolution
-  CLIProcessRunner.swift       # Async Process wrapper, line-streamed stdout
-  CLIPromptComposer.swift      # Builds prompt text + screenshot file list
-  CLIEngineWorkspace.swift     # Per-request temp dir + screenshot writing
-  LocalSpeechTTSClient.swift   # Local AVSpeechSynthesizer TTS
-  AppleSpeechTranscriptionProvider.swift  # On-device STT (default)
-  OverlayWindow.swift          # Blue cursor overlay
-  BuddyDictation*.swift        # Push-to-talk pipeline
-ClawdyTests/                 # Unit tests (binary resolution, args, parsing)
-AGENTS.md / CLAUDE.md        # Full architecture doc (agents read this)
-```
 
 ## License
 
