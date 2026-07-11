@@ -98,12 +98,12 @@ final class ClaudeResearchEngine: ResearchEngine {
     /// Read once per engine instance; a fresh engine is built for every run, so a
     /// toggle takes effect on the next research run with no respawn needed.
     private let useClaudeCustomizations: Bool
-    /// Caps for the deterministic post-write image-validation pass (per-image
+    /// Caps for the deterministic post-write image-localization pass (per-image
     /// timeout + overall budget + concurrency). Injectable so tests can shrink them.
     private let imageValidationConfig: ResearchImageValidationConfig
-    /// Builds the image-validation fetch seam. Defaults to the real HTTP validator;
+    /// Builds the image-download fetch seam. Defaults to the real HTTP downloader;
     /// tests inject a deterministic fake so the pass never touches the network.
-    private let makeImageValidator: () -> ImageURLValidating
+    private let makeImageDownloader: () -> ImageURLDownloading
 
     init(
         binaryPath: String,
@@ -113,8 +113,8 @@ final class ClaudeResearchEngine: ResearchEngine {
         maxBudgetUSD: Double = 5,
         useClaudeCustomizations: Bool = true,
         imageValidationConfig: ResearchImageValidationConfig = .default,
-        makeImageValidator: @escaping () -> ImageURLValidating = {
-            URLSessionImageURLValidator()
+        makeImageDownloader: @escaping () -> ImageURLDownloading = {
+            URLSessionImageDownloader()
         }
     ) {
         self.binaryPath = binaryPath
@@ -124,7 +124,7 @@ final class ClaudeResearchEngine: ResearchEngine {
         self.maxBudgetUSD = maxBudgetUSD
         self.useClaudeCustomizations = useClaudeCustomizations
         self.imageValidationConfig = imageValidationConfig
-        self.makeImageValidator = makeImageValidator
+        self.makeImageDownloader = makeImageDownloader
     }
 
     // MARK: - System prompts
@@ -142,7 +142,7 @@ final class ClaudeResearchEngine: ResearchEngine {
 
     DO ALL OF THIS YOURSELF, INLINE, IN THIS ONE TURN, using ONLY the WebSearch, WebFetch and Write tools. this is a one-shot run with NO background job system and NO notification will ever arrive — anything you hand off never comes back. so DO NOT invoke, launch, spawn, or delegate to any background task, skill, workflow, agent, sub-agent, task queue, or the deep-research skill / Workflow plugin, and DO NOT end your turn waiting to be notified that a background job finished. if you notice yourself about to launch a background workflow or skill, STOP and instead perform the WebSearch/WebFetch calls directly and Write the HTML now, in this turn.
 
-    the HTML MUST keep all of its OWN code inline so it renders with no local dependencies: inline <style> only, no external stylesheet links, no external script src, no CDN references, no remote fonts. the ONE exception is images: when the task is about photos or images, you SHOULD embed the real images you found via <img src="https://..."> pointing at the actual remote image URLs you discovered while researching — that's how the user sees them. use genuine image URLs from your research, not placeholders, and NEVER fabricate or guess an image URL. prefer DIRECT image-file URLs (ones ending in .jpg/.jpeg/.png/.webp/.gif or that clearly serve the raw image file) taken straight from your search results or well-known sources. do NOT WebFetch, open, or otherwise verify image URLs before embedding them — WebFetch on a raw image binary just fails and wastes a tool call; embed the image URL directly. broken or unreachable images are handled automatically after the page is written (they're swapped for a clean placeholder), so never spend tool calls checking images. reserve WebFetch for reading actual page/article content, not images. everything else stays inline. make it clean, readable, and well organized with clear headings. give the page a subtle OpenClaw red brand accent (#E5342B): use it for headings, links, and small primary accents like rules or key highlights, and optionally a very light red background tint — keep it tasteful and restrained, keep body text high-contrast and readable, and never tint photos/images or force red where it hurts legibility. do not write any file other than report.html. when you're done, briefly confirm in your final message.
+    the HTML MUST keep all of its OWN code inline so it renders with no local dependencies: inline <style> only, no external stylesheet links, no external script src, no CDN references, no remote fonts. the ONE exception is images: when the task is about photos or images, you SHOULD embed the real images you found via <img src="https://..."> pointing at the actual remote image URLs you discovered while researching — that's how the user sees them. use genuine image URLs from your research, not placeholders, and NEVER fabricate or guess an image URL. prefer DIRECT image-file URLs (ones ending in .jpg/.jpeg/.png/.webp/.gif or that clearly serve the raw image file) taken straight from your search results or well-known sources. prefer canonical, original-resolution image URLs and do NOT guess or construct sized thumbnail paths (e.g. never fabricate Wikimedia /thumb/.../NNNpx- variants). do NOT WebFetch, open, or otherwise verify image URLs before embedding them — WebFetch on a raw image binary just fails and wastes a tool call; embed the image URL directly. broken or unreachable images are handled automatically after the page is written (they're swapped for a clean placeholder), so never spend tool calls checking images. reserve WebFetch for reading actual page/article content, not images. everything else stays inline. make it clean, readable, and well organized with clear headings. give the page a subtle OpenClaw red brand accent (#E5342B): use it for headings, links, and small primary accents like rules or key highlights, and optionally a very light red background tint — keep it tasteful and restrained, keep body text high-contrast and readable, and never tint photos/images or force red where it hurts legibility. do not write any file other than report.html. when you're done, briefly confirm in your final message.
     """
 
     static let followUpSystemPrompt = """
@@ -356,24 +356,28 @@ final class ClaudeResearchEngine: ResearchEngine {
         guard let deliverableURL = Self.locateDeliverable(in: outputDirectory) else {
             throw ResearchError.noDeliverableProduced
         }
-        // DETERMINISTIC image-validation pass: before the page is ever shown, fetch
-        // every embedded remote <img> and rewrite report.html so any broken image is
-        // an OpenClaw-red "Image unavailable" placeholder instead of a browser
-        // broken-image icon. Time-bounded (never hangs the run); skipped if the run
-        // was cancelled while draining.
+        // DETERMINISTIC image-localization pass: before the page is ever shown, fetch
+        // every embedded remote <img>, DOWNLOAD each into an `images/` folder next to
+        // report.html, and rewrite the page so a working image points at its LOCAL file
+        // (no remote request at render time) and a broken one becomes an OpenClaw-red
+        // "Image unavailable" placeholder instead of a browser broken-image icon.
+        // Time-bounded (never hangs the run); skipped if the run was cancelled while
+        // draining.
         if !Task.isCancelled {
             await validateDeliverableImages(fileURL: deliverableURL)
         }
         return deliverableURL
     }
 
-    /// Runs the deterministic image-validation pass over a just-produced (or
-    /// just-rewritten) deliverable. Time-bounded by `imageValidationConfig` so it can
-    /// never hang the research run; a no-op when the page has no remote images.
+    /// Runs the deterministic image-localization pass over a just-produced (or
+    /// just-rewritten) deliverable: downloads each remote image into `images/` and
+    /// rewrites its `<img src>` to the local path (broken ones → inline placeholder).
+    /// Time-bounded by `imageValidationConfig` so it can never hang the research run;
+    /// a no-op when the page has no remote images.
     private func validateDeliverableImages(fileURL: URL) async {
         await ResearchImageValidator.validateAndRewriteDeliverable(
             fileURL: fileURL,
-            validator: makeImageValidator(),
+            downloader: makeImageDownloader(),
             config: imageValidationConfig
         )
     }
@@ -512,7 +516,7 @@ final class ClaudeResearchEngine: ResearchEngine {
         clarificationAnswers: String?
     ) -> String {
         let executeInstructions = """
-        proceed with the research now, yourself, inline, in THIS one turn, using ONLY the WebSearch, WebFetch and Write tools. this is a one-shot run: there is NO background job system and NO notification will ever arrive, so DO NOT invoke, launch, or delegate to any background task, skill, workflow, agent, sub-agent, or the deep-research skill / Workflow plugin, and DO NOT end your turn waiting to be notified about a background job — if you catch yourself about to launch one, instead run the searches directly and write the HTML now. use WebSearch and WebFetch to research the task thoroughly, then write ONE self-contained HTML page to the absolute path \(outputFileAbsolutePath). the page MUST keep all of its OWN code inline: inline <style> only, no external stylesheet links, no external script src, no CDN or remote font references. the ONE exception is images — when the task is about photos or images, embed the real images you found via <img src="https://..."> using the actual remote image URLs you discovered while researching (genuine URLs, not placeholders), so the user can actually see them. NEVER fabricate or guess an image URL: prefer DIRECT image-file URLs (ending in .jpg/.jpeg/.png/.webp/.gif or that clearly serve the raw image) taken straight from your search results or well-known sources. do NOT WebFetch, open, or otherwise verify image URLs before embedding them — WebFetch on a raw image binary just fails and wastes a tool call; embed the image URL directly. broken or unreachable images are handled automatically after the page is written (they're swapped for a clean placeholder), so never spend tool calls checking images. reserve WebFetch for reading actual page/article content, not images. everything else stays inline. give the page a subtle OpenClaw red brand accent (#E5342B): use it for headings, links, and small primary accents, and optionally a very light red background tint — keep it tasteful, keep body text high-contrast and readable, and never tint photos/images or force red where it hurts legibility. do not write any file other than that one report.html. when you're done, briefly confirm.
+        proceed with the research now, yourself, inline, in THIS one turn, using ONLY the WebSearch, WebFetch and Write tools. this is a one-shot run: there is NO background job system and NO notification will ever arrive, so DO NOT invoke, launch, or delegate to any background task, skill, workflow, agent, sub-agent, or the deep-research skill / Workflow plugin, and DO NOT end your turn waiting to be notified about a background job — if you catch yourself about to launch one, instead run the searches directly and write the HTML now. use WebSearch and WebFetch to research the task thoroughly, then write ONE self-contained HTML page to the absolute path \(outputFileAbsolutePath). the page MUST keep all of its OWN code inline: inline <style> only, no external stylesheet links, no external script src, no CDN or remote font references. the ONE exception is images — when the task is about photos or images, embed the real images you found via <img src="https://..."> using the actual remote image URLs you discovered while researching (genuine URLs, not placeholders), so the user can actually see them. NEVER fabricate or guess an image URL: prefer DIRECT image-file URLs (ending in .jpg/.jpeg/.png/.webp/.gif or that clearly serve the raw image) taken straight from your search results or well-known sources. prefer canonical, original-resolution image URLs and do NOT guess or construct sized thumbnail paths (e.g. never fabricate Wikimedia /thumb/.../NNNpx- variants). do NOT WebFetch, open, or otherwise verify image URLs before embedding them — WebFetch on a raw image binary just fails and wastes a tool call; embed the image URL directly. broken or unreachable images are handled automatically after the page is written (they're swapped for a clean placeholder), so never spend tool calls checking images. reserve WebFetch for reading actual page/article content, not images. everything else stays inline. give the page a subtle OpenClaw red brand accent (#E5342B): use it for headings, links, and small primary accents, and optionally a very light red background tint — keep it tasteful, keep body text high-contrast and readable, and never tint photos/images or force red where it hurts legibility. do not write any file other than that one report.html. when you're done, briefly confirm.
         """
         if let answers = clarificationAnswers?.trimmingCharacters(in: .whitespacesAndNewlines), !answers.isEmpty {
             return answers + "\n\n" + executeInstructions

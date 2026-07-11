@@ -80,14 +80,14 @@ final class CodexResearchEngine: ResearchEngine {
     /// resume). Defaults to `.shared`, the same store the research session/manager use in
     /// production, so both write the SAME `manifest.json`; tests inject a temp store.
     private let manifestStore: ResearchManifestStore
-    /// Caps for the deterministic post-write image-validation pass (per-image
+    /// Caps for the deterministic post-write image-localization pass (per-image
     /// timeout + overall budget + concurrency). Injectable so tests can shrink them.
     /// SAME pass the Claude engine runs — this is what makes the execute prompt's
     /// "broken images are handled automatically" promise TRUE for Codex too.
     private let imageValidationConfig: ResearchImageValidationConfig
-    /// Builds the image-validation fetch seam. Defaults to the real HTTP validator;
+    /// Builds the image-download fetch seam. Defaults to the real HTTP downloader;
     /// tests inject a deterministic fake so the pass never touches the network.
-    private let makeImageValidator: () -> ImageURLValidating
+    private let makeImageDownloader: () -> ImageURLDownloading
 
     /// Per-run mutable state, lock-guarded because it is written across the (nonisolated,
     /// async) engine methods and read on the main-actor follow-up path:
@@ -143,8 +143,8 @@ final class CodexResearchEngine: ResearchEngine {
         executePhaseTimeoutSeconds: TimeInterval = 600,
         manifestStore: ResearchManifestStore = .shared,
         imageValidationConfig: ResearchImageValidationConfig = .default,
-        makeImageValidator: @escaping () -> ImageURLValidating = {
-            URLSessionImageURLValidator()
+        makeImageDownloader: @escaping () -> ImageURLDownloading = {
+            URLSessionImageDownloader()
         }
     ) {
         self.binaryPath = binaryPath
@@ -152,7 +152,7 @@ final class CodexResearchEngine: ResearchEngine {
         self.executePhaseTimeoutSeconds = executePhaseTimeoutSeconds
         self.manifestStore = manifestStore
         self.imageValidationConfig = imageValidationConfig
-        self.makeImageValidator = makeImageValidator
+        self.makeImageDownloader = makeImageDownloader
     }
 
     /// The deterministic deliverable filename the execute prompt instructs Codex to
@@ -325,26 +325,29 @@ final class CodexResearchEngine: ResearchEngine {
         guard let deliverableURL = Self.locateDeliverable(in: outputDirectory) else {
             throw ResearchError.noDeliverableProduced
         }
-        // DETERMINISTIC image-validation pass (same as the Claude engine): before the
-        // page is ever shown, fetch every embedded remote <img> and rewrite report.html
-        // so any broken image becomes an inline "Image unavailable" placeholder. This is
-        // what makes the execute prompt's "broken images are handled automatically"
-        // promise true for Codex. Time-bounded (never hangs the run); skipped if the run
-        // was cancelled while draining.
+        // DETERMINISTIC image-localization pass (same as the Claude engine): before the
+        // page is ever shown, DOWNLOAD every embedded remote <img> into an `images/`
+        // folder next to report.html and rewrite the page so a working image points at
+        // its LOCAL file (no remote request at render time) and a broken one becomes an
+        // inline "Image unavailable" placeholder. This is what makes the execute prompt's
+        // "broken images are handled automatically" promise true for Codex. Time-bounded
+        // (never hangs the run); skipped if the run was cancelled while draining.
         if !Task.isCancelled {
             await validateDeliverableImages(fileURL: deliverableURL)
         }
         return deliverableURL
     }
 
-    /// Runs the deterministic image-validation pass over a just-produced (or
-    /// just-rewritten) deliverable. Time-bounded by `imageValidationConfig` so it can
-    /// never hang the research run; a no-op when the page has no remote images; never
-    /// throws. Mirrors `ClaudeResearchEngine.validateDeliverableImages`.
+    /// Runs the deterministic image-localization pass over a just-produced (or
+    /// just-rewritten) deliverable: downloads each remote image into `images/` and
+    /// rewrites its `<img src>` to the local path (broken ones → inline placeholder).
+    /// Time-bounded by `imageValidationConfig` so it can never hang the research run; a
+    /// no-op when the page has no remote images; never throws. Mirrors
+    /// `ClaudeResearchEngine.validateDeliverableImages`.
     private func validateDeliverableImages(fileURL: URL) async {
         await ResearchImageValidator.validateAndRewriteDeliverable(
             fileURL: fileURL,
-            validator: makeImageValidator(),
+            downloader: makeImageDownloader(),
             config: imageValidationConfig
         )
     }
@@ -427,7 +430,7 @@ final class CodexResearchEngine: ResearchEngine {
         clarificationAnswers: String?
     ) -> String {
         let instructions = """
-        you are clawdy's research agent. research the task thoroughly using web search NOW, in THIS one turn, yourself — do the searches and reading directly, do not defer or wait to be notified about any background job. then write ONE self-contained HTML page to the absolute path \(outputFileAbsolutePath). the page MUST keep all of its OWN code inline so it renders with no local dependencies: inline <style> only, no external stylesheet links, no external script src, no CDN or remote font references. the ONE exception is images — when the task is about photos or images, embed the real images you found via <img src="https://..."> using the actual remote image URLs you discovered while researching (genuine URLs, not placeholders), so the user can actually see them. NEVER fabricate or guess an image URL. do NOT open, fetch, or otherwise verify image URLs before embedding them — that just wastes a tool call; embed the image URL directly from your search results. broken or unreachable images are handled automatically after the page is written (they're swapped for a clean placeholder), so never spend tool calls checking images. give the page a subtle OpenClaw red brand accent (#E5342B): use it for headings, links, and small primary accents, and optionally a very light red background tint — keep it tasteful, keep body text high-contrast and readable, and never tint photos/images. do not write any file other than that one report.html. when you're done, briefly confirm in your final message.
+        you are clawdy's research agent. research the task thoroughly using web search NOW, in THIS one turn, yourself — do the searches and reading directly, do not defer or wait to be notified about any background job. then write ONE self-contained HTML page to the absolute path \(outputFileAbsolutePath). the page MUST keep all of its OWN code inline so it renders with no local dependencies: inline <style> only, no external stylesheet links, no external script src, no CDN or remote font references. the ONE exception is images — when the task is about photos or images, embed the real images you found via <img src="https://..."> using the actual remote image URLs you discovered while researching (genuine URLs, not placeholders), so the user can actually see them. NEVER fabricate or guess an image URL. prefer canonical, original-resolution image URLs and do NOT guess or construct sized thumbnail paths (e.g. never fabricate Wikimedia /thumb/.../NNNpx- variants). do NOT open, fetch, or otherwise verify image URLs before embedding them — that just wastes a tool call; embed the image URL directly from your search results. broken or unreachable images are handled automatically after the page is written (they're swapped for a clean placeholder), so never spend tool calls checking images. give the page a subtle OpenClaw red brand accent (#E5342B): use it for headings, links, and small primary accents, and optionally a very light red background tint — keep it tasteful, keep body text high-contrast and readable, and never tint photos/images. do not write any file other than that one report.html. when you're done, briefly confirm in your final message.
         """
         // The TASK leads so Codex knows what to research; then the clarifying answers (if
         // any); then the fixed research/output constraints.

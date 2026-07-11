@@ -362,6 +362,27 @@ struct ResearchArgumentsTests {
         #expect(message.contains("reading actual page/article content"))
     }
 
+    // Thumbnail-404 regression: models sometimes FABRICATE sized thumbnail URLs (e.g.
+    // Wikimedia /thumb/.../NNNpx- variants) that 404. Since images are now downloaded +
+    // localized after the page is written, a guessed thumbnail that 404s becomes a
+    // placeholder — so the execute SYSTEM prompt AND user message must nudge the model
+    // to prefer canonical, original-resolution image URLs and NOT construct thumbnail
+    // sizes. (This is the ONLY image-clause nudge; the rest of the prompt is unchanged.)
+    @Test func executePromptsPreferCanonicalImageURLsAndForbidGuessingThumbnails() {
+        let systemPrompt = ClaudeResearchEngine.executeSystemPrompt.lowercased()
+        #expect(systemPrompt.contains("canonical, original-resolution"))
+        #expect(systemPrompt.contains("thumbnail"))
+        #expect(systemPrompt.contains("wikimedia"))
+
+        let userMessage = ClaudeResearchEngine.composeExecuteUserMessage(
+            outputFileAbsolutePath: "/tmp/run/report.html",
+            clarificationAnswers: nil
+        ).lowercased()
+        #expect(userMessage.contains("canonical, original-resolution"))
+        #expect(userMessage.contains("thumbnail"))
+        #expect(userMessage.contains("wikimedia"))
+    }
+
     // Background-delegation guard: the plan-phase `claude -p` runs the user's OWN
     // customizations (no --safe-mode by default), so it can load a deep-research skill
     // / Workflow plugin and LAUNCH IT AS A BACKGROUND TASK — which never resumes in a

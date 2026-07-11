@@ -218,23 +218,23 @@ private func makeThreadStartedThenHangCodexBinary() throws -> String {
     return try ResearchTestSupport.makeFakeExecutable(scriptBody: scriptContents)
 }
 
-/// A fake `ImageURLValidating` for the Codex execute path's post-write validation test:
-/// answers from a fixed map (defaulting unknown URLs to `.invalid`) and records every URL
-/// it was asked about, so the test can assert the validator was actually consulted.
-private actor CodexFakeImageURLValidator: ImageURLValidating {
-    private let resultsByAbsoluteString: [String: ImageValidationResult]
-    private var validatedAbsoluteStrings: [String] = []
+/// A fake `ImageURLDownloading` for the Codex execute path's post-write localization
+/// test: answers from a fixed map (defaulting unknown URLs to `.failed`) and records
+/// every URL it was asked about, so the test can assert the downloader was consulted.
+private actor CodexFakeImageDownloader: ImageURLDownloading {
+    private let outcomesByAbsoluteString: [String: ImageDownloadOutcome]
+    private var requestedAbsoluteStrings: [String] = []
 
-    init(resultsByAbsoluteString: [String: ImageValidationResult]) {
-        self.resultsByAbsoluteString = resultsByAbsoluteString
+    init(outcomesByAbsoluteString: [String: ImageDownloadOutcome]) {
+        self.outcomesByAbsoluteString = outcomesByAbsoluteString
     }
 
-    func validate(imageURL: URL) async -> ImageValidationResult {
-        validatedAbsoluteStrings.append(imageURL.absoluteString)
-        return resultsByAbsoluteString[imageURL.absoluteString] ?? .invalid
+    func downloadImage(from imageURL: URL) async -> ImageDownloadOutcome {
+        requestedAbsoluteStrings.append(imageURL.absoluteString)
+        return outcomesByAbsoluteString[imageURL.absoluteString] ?? .failed
     }
 
-    func validatedURLStrings() -> [String] { validatedAbsoluteStrings }
+    func requestedURLStrings() -> [String] { requestedAbsoluteStrings }
 }
 
 /// A unique fake $HOME so the fake's `~/.codex/sessions/...` rollout write is isolated.
@@ -288,6 +288,21 @@ struct CodexResearchExecutePromptTests {
         #expect(prompt.contains("handled automatically"))
         // Direct embedding of remote images is still permitted.
         #expect(prompt.contains("<img src=\"https://"))
+    }
+
+    // Parity with the Claude execute prompt's image-clause nudge: since images are now
+    // downloaded + localized after the page is written, a guessed/fabricated thumbnail
+    // URL that 404s becomes a placeholder. The Codex execute prompt must nudge toward
+    // canonical, original-resolution image URLs and away from constructing thumbnail sizes.
+    @Test func executePromptPrefersCanonicalImageURLsAndForbidsGuessingThumbnails() {
+        let prompt = CodexResearchEngine.composeExecutePrompt(
+            task: "show me the best national parks",
+            outputFileAbsolutePath: "/tmp/run/report.html",
+            clarificationAnswers: nil
+        ).lowercased()
+        #expect(prompt.contains("canonical, original-resolution"))
+        #expect(prompt.contains("thumbnail"))
+        #expect(prompt.contains("wikimedia"))
     }
 }
 
@@ -353,22 +368,22 @@ struct CodexResearchExecuteLifecycleTests {
     /// Cross-review BLOCKING: the Codex execute prompt promises broken images are
     /// "handled automatically after the page is written (they're swapped for a clean
     /// placeholder)". That promise is only TRUE if the Codex execute path actually runs
-    /// the deterministic post-write `ResearchImageValidator` pass — the same one the
-    /// Claude engine runs. This proves it does: with an injected validator that marks the
-    /// embedded remote image INVALID, the produced report.html is rewritten so the broken
-    /// image is replaced by the inline "Image unavailable" placeholder and the bad URL is
-    /// gone. (Uses a fake validator + fake codex binary — no network.)
+    /// the deterministic post-write `ResearchImageValidator` localization pass — the same
+    /// one the Claude engine runs. This proves it does: with an injected downloader that
+    /// FAILS the embedded remote image, the produced report.html is rewritten so the
+    /// broken image is replaced by the inline "Image unavailable" placeholder and the bad
+    /// URL is gone. (Uses a fake downloader + fake codex binary — no network.)
     @Test func executePhaseRunsThePostWriteImageValidationOnItsDeliverable() async throws {
         let brokenImageURL = "https://example.com/broken.jpg"
         let codexBinary = try makeFakeCodexBinary(embeddedImageURL: brokenImageURL)
-        let fakeValidator = CodexFakeImageURLValidator(
-            resultsByAbsoluteString: [brokenImageURL: .invalid]
+        let fakeDownloader = CodexFakeImageDownloader(
+            outcomesByAbsoluteString: [brokenImageURL: .failed]
         )
         let engine = CodexResearchEngine(
             binaryPath: codexBinary,
             homeDirectoryPath: try makeFakeCodexHome(),
             executePhaseTimeoutSeconds: 60,
-            makeImageValidator: { fakeValidator }
+            makeImageDownloader: { fakeDownloader }
         )
         let outputDirectory = try makeCodexScratchOutputDirectory(engine: engine, runID: "client-run-img")
         defer { try? FileManager.default.removeItem(at: outputDirectory) }
@@ -384,16 +399,64 @@ struct CodexResearchExecuteLifecycleTests {
             onProgress: { _ in }
         )
 
-        // The validator was actually consulted about the embedded image.
-        let validated = await fakeValidator.validatedURLStrings()
-        #expect(validated.contains(brokenImageURL),
-                "the Codex execute path must run the post-write image validator on its deliverable")
+        // The downloader was actually consulted about the embedded image.
+        let requested = await fakeDownloader.requestedURLStrings()
+        #expect(requested.contains(brokenImageURL),
+                "the Codex execute path must run the post-write image localization on its deliverable")
         // …and the broken image was rewritten to the inline placeholder on disk.
         let rewrittenHTML = try String(contentsOf: deliverableURL, encoding: .utf8)
         #expect(rewrittenHTML.contains("Image unavailable"),
                 "the broken remote image must be swapped for the inline placeholder")
         #expect(!rewrittenHTML.contains(brokenImageURL),
                 "the broken image URL must no longer be embedded after the validation pass")
+    }
+
+    /// Codex parity for the DOWNLOAD-AND-LOCALIZE fix: when the embedded remote image
+    /// downloads successfully, the Codex execute path must persist it under `images/`
+    /// next to report.html and rewrite the `<img src>` to that LOCAL path — so the
+    /// rendered page references local files (no remote request at render time), exactly
+    /// like the Claude path.
+    @Test func executePhaseLocalizesAFetchableImageOnItsDeliverable() async throws {
+        let goodImageURL = "https://example.com/photo.jpg"
+        let codexBinary = try makeFakeCodexBinary(embeddedImageURL: goodImageURL)
+        let jpegBytes = Data([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10])
+        let fakeDownloader = CodexFakeImageDownloader(
+            outcomesByAbsoluteString: [goodImageURL: .downloaded(data: jpegBytes, contentType: "image/jpeg")]
+        )
+        let engine = CodexResearchEngine(
+            binaryPath: codexBinary,
+            homeDirectoryPath: try makeFakeCodexHome(),
+            executePhaseTimeoutSeconds: 60,
+            makeImageDownloader: { fakeDownloader }
+        )
+        let outputDirectory = try makeCodexScratchOutputDirectory(engine: engine, runID: "client-run-localize")
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+
+        _ = try await engine.runPlanPhase(
+            task: "gallery of things", sessionID: "client-run-localize",
+            outputDirectory: outputDirectory, onProgress: { _ in }
+        )
+        let deliverableURL = try await engine.runExecutePhase(
+            sessionID: "client-run-localize",
+            outputDirectory: outputDirectory,
+            clarificationAnswers: nil,
+            onProgress: { _ in }
+        )
+
+        let rewrittenHTML = try String(contentsOf: deliverableURL, encoding: .utf8)
+        // The remote URL is gone; the src now points at the local file.
+        #expect(!rewrittenHTML.contains(goodImageURL),
+                "the fetchable image must no longer be a remote URL after localization")
+        let expectedLocalName = ResearchImageValidator.localImageFileName(
+            forSourceURLString: goodImageURL, fileExtension: "jpg"
+        )
+        #expect(rewrittenHTML.contains("images/\(expectedLocalName)"))
+        // …and the downloaded bytes were persisted under images/ next to report.html.
+        let localImageURL = outputDirectory
+            .appendingPathComponent("images", isDirectory: true)
+            .appendingPathComponent(expectedLocalName)
+        #expect(FileManager.default.fileExists(atPath: localImageURL.path))
+        #expect(try Data(contentsOf: localImageURL) == jpegBytes)
     }
 
     /// MINOR 3: when the execute turn produces a deliverable but NO thread_id (a

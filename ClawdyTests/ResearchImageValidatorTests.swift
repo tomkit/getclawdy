@@ -2,70 +2,71 @@
 //  ResearchImageValidatorTests.swift
 //  ClawdyTests
 //
-//  Covers the DETERMINISTIC image-validation pass that guarantees the research
-//  deliverable never shows a broken remote image:
+//  Covers the DETERMINISTIC image-LOCALIZATION pass that guarantees the research
+//  deliverable never shows a broken remote image AND renders the exact bytes we
+//  verified (no remote request at render time):
 //   - the pure `<img src>` extraction (remote-only, deduped, in order),
 //   - the validity predicate (200 + image/* + non-empty body → valid),
-//   - the pure HTML rewrite (broken images → inline placeholder, valid ones + other
-//     markup untouched),
-//   - and the time-bounded orchestrator driven through an INJECTED fake validator so
-//     no real network is used (valid/invalid mixes, budget fail-safe).
-//
-//  The render-time WKWebView JS net (layer B) is not exercised here — it needs a live
-//  eyeball in the running app.
+//   - the local filename + extension derivation (magic-byte sniff → Content-Type →
+//     URL extension, stable per-source filename),
+//   - the pure HTML rewrite (downloaded images → LOCAL `images/…` src, broken images
+//     → inline placeholder, other markup untouched),
+//   - and the time-bounded orchestrator driven through an INJECTED fake downloader so
+//     no real network is used (download/fail mixes, budget fail-safe), including the
+//     end-to-end on-disk localize (a good image is written to `images/` and its src is
+//     rewritten to that local file).
 //
 
 import Testing
 import Foundation
 @testable import Clawdy
 
-// MARK: - A deterministic, network-free validator
+// MARK: - Deterministic, network-free downloaders
 
-/// A fake `ImageURLValidating` that answers from a fixed map of absolute-string →
-/// result, defaulting unknown URLs to `.invalid`. Optionally records each URL it was
+/// A tiny valid-looking JPEG payload (real magic bytes) the fakes hand back for a
+/// "good" image, so the pass writes a file whose extension sniffs to `jpg`.
+private let fakeJPEGData = Data([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46])
+
+/// A fake `ImageURLDownloading` that answers from a fixed map of absolute-string →
+/// outcome, defaulting unknown URLs to `.failed`. Optionally records each URL it was
 /// asked about and can simulate a slow response to exercise the overall budget.
-private actor FakeImageURLValidator: ImageURLValidating {
-    private let resultsByAbsoluteString: [String: ImageValidationResult]
+private actor FakeImageDownloader: ImageURLDownloading {
+    private let outcomesByAbsoluteString: [String: ImageDownloadOutcome]
     private let artificialDelayNanoseconds: UInt64
-    private var validatedAbsoluteStrings: [String] = []
+    private var requestedAbsoluteStrings: [String] = []
 
     init(
-        resultsByAbsoluteString: [String: ImageValidationResult],
+        outcomesByAbsoluteString: [String: ImageDownloadOutcome],
         artificialDelayNanoseconds: UInt64 = 0
     ) {
-        self.resultsByAbsoluteString = resultsByAbsoluteString
+        self.outcomesByAbsoluteString = outcomesByAbsoluteString
         self.artificialDelayNanoseconds = artificialDelayNanoseconds
     }
 
-    func validate(imageURL: URL) async -> ImageValidationResult {
+    func downloadImage(from imageURL: URL) async -> ImageDownloadOutcome {
         if artificialDelayNanoseconds > 0 {
             try? await Task.sleep(nanoseconds: artificialDelayNanoseconds)
         }
-        // Record via a nonisolated hop is unnecessary — we're already the actor.
-        return await recordAndResult(for: imageURL.absoluteString)
+        requestedAbsoluteStrings.append(imageURL.absoluteString)
+        return outcomesByAbsoluteString[imageURL.absoluteString] ?? .failed
     }
 
-    private func recordAndResult(for absoluteString: String) -> ImageValidationResult {
-        validatedAbsoluteStrings.append(absoluteString)
-        return resultsByAbsoluteString[absoluteString] ?? .invalid
-    }
-
-    func validatedURLStrings() -> [String] { validatedAbsoluteStrings }
+    func requestedURLStrings() -> [String] { requestedAbsoluteStrings }
 }
 
-/// The adversary the budget fail-safe MUST defeat: a validator that returns `.valid`
-/// ONLY AFTER it observes its task was cancelled (i.e. its success arrives just after
-/// the overall budget fires). Without the post-validate cancellation re-check + the
-/// collector seal, such a late `.valid` would be recorded and the image wrongly KEPT.
-/// It polls (swallowing cancellation on each sleep) so it also models a non-cooperative
-/// validator that ignores cancellation until it decides to return.
-private actor ReturnsValidAfterCancellationValidator: ImageURLValidating {
-    func validate(imageURL: URL) async -> ImageValidationResult {
+/// The adversary the budget fail-safe MUST defeat: a downloader that returns
+/// `.downloaded` ONLY AFTER it observes its task was cancelled (i.e. its success
+/// arrives just after the overall budget fires). Without the post-download
+/// cancellation re-check + the collector seal, such a late payload would be recorded
+/// and the image wrongly KEPT. It polls (swallowing cancellation on each sleep) so it
+/// also models a non-cooperative downloader that ignores cancellation until it returns.
+private actor ReturnsDownloadedAfterCancellationDownloader: ImageURLDownloading {
+    func downloadImage(from imageURL: URL) async -> ImageDownloadOutcome {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 5_000_000) // 5ms poll; swallows cancellation
         }
-        // Cancellation observed — return a LATE valid, exactly what must be dropped.
-        return .valid
+        // Cancellation observed — return a LATE payload, exactly what must be dropped.
+        return .downloaded(data: fakeJPEGData, contentType: "image/jpeg")
     }
 }
 
@@ -104,8 +105,6 @@ struct ResearchImageExtractionTests {
     }
 
     @Test func handlesUnquotedSourceValues() {
-        // A valid (if unusual) unquoted src must be covered by Layer A too, not left
-        // for the render-time net alone.
         let html = "<div><img src=https://u.example/raw.jpg width=100><img src=https://u.example/two.png></div>"
         #expect(
             ResearchImageValidator.extractImageSourceURLs(fromHTML: html)
@@ -154,7 +153,88 @@ struct ResearchImageValidityPredicateTests {
     }
 }
 
-// MARK: - Pure HTML rewrite
+// MARK: - Local filename + extension derivation (pure)
+
+struct ResearchImageLocalFileDerivationTests {
+
+    @Test func sniffsCommonBinaryImageFormats() {
+        #expect(ResearchImageValidator.sniffImageFileExtension(fromData: Data([0xFF, 0xD8, 0xFF, 0xE0])) == "jpg")
+        #expect(ResearchImageValidator.sniffImageFileExtension(
+            fromData: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        ) == "png")
+        #expect(ResearchImageValidator.sniffImageFileExtension(fromData: Data([0x47, 0x49, 0x46, 0x38, 0x39, 0x61])) == "gif")
+        let webp = Data([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50])
+        #expect(ResearchImageValidator.sniffImageFileExtension(fromData: webp) == "webp")
+    }
+
+    @Test func sniffDoesNotMistakeAnHTMLBlockPageForAnImage() {
+        // A text/HTML error page (even one that leads with "<") must NOT sniff as an
+        // image, so an octet-stream-labeled block page is never localized.
+        #expect(ResearchImageValidator.sniffImageFileExtension(fromData: Data("<!DOCTYPE html><html>…".utf8)) == nil)
+        #expect(ResearchImageValidator.sniffImageFileExtension(fromData: Data("not an image at all".utf8)) == nil)
+    }
+
+    @Test func extensionPrefersTheSniffedBytesOverContentTypeAndURL() {
+        // PNG bytes mislabeled as jpeg with a .gif URL → the sniff wins → png (so the
+        // local file gets the extension that actually matches the bytes, which is what
+        // lets the WKWebView render it).
+        let fileExtension = ResearchImageValidator.localImageFileExtension(
+            contentType: "image/jpeg",
+            sourceURLString: "https://x.example/pic.gif",
+            data: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        )
+        #expect(fileExtension == "png")
+    }
+
+    @Test func extensionFallsBackToContentTypeThenURLThenJpg() {
+        // Unsniffable bytes → Content-Type mapping (parameters tolerated).
+        #expect(ResearchImageValidator.localImageFileExtension(
+            contentType: "image/webp; charset=binary",
+            sourceURLString: "https://x.example/p",
+            data: Data([0x01, 0x02, 0x03])
+        ) == "webp")
+        // Unsniffable + non-image Content-Type (octet-stream) → the URL's own extension.
+        #expect(ResearchImageValidator.localImageFileExtension(
+            contentType: "application/octet-stream",
+            sourceURLString: "https://x.example/photo.PNG",
+            data: Data([0x01, 0x02])
+        ) == "png")
+        // Nothing usable anywhere → a `jpg` last resort.
+        #expect(ResearchImageValidator.localImageFileExtension(
+            contentType: nil,
+            sourceURLString: "https://x.example/noext",
+            data: Data([0x01, 0x02])
+        ) == "jpg")
+    }
+
+    @Test func contentTypeMappingCoversCommonImageTypes() {
+        #expect(ResearchImageValidator.imageFileExtension(forContentType: "image/jpeg") == "jpg")
+        #expect(ResearchImageValidator.imageFileExtension(forContentType: "image/svg+xml") == "svg")
+        #expect(ResearchImageValidator.imageFileExtension(forContentType: "image/gif") == "gif")
+        // A non-image type maps to nil.
+        #expect(ResearchImageValidator.imageFileExtension(forContentType: "text/html") == nil)
+    }
+
+    @Test func localFileNameIsStableForTheSameSourceAndDiffersAcrossSources() {
+        let first = ResearchImageValidator.localImageFileName(
+            forSourceURLString: "https://x.example/a.jpg", fileExtension: "jpg"
+        )
+        let firstAgain = ResearchImageValidator.localImageFileName(
+            forSourceURLString: "https://x.example/a.jpg", fileExtension: "jpg"
+        )
+        let second = ResearchImageValidator.localImageFileName(
+            forSourceURLString: "https://x.example/b.jpg", fileExtension: "jpg"
+        )
+        #expect(first == firstAgain)   // deterministic per source URL
+        #expect(first != second)       // distinct sources get distinct files
+        #expect(first.hasPrefix("img-"))
+        #expect(first.hasSuffix(".jpg"))
+        // Filesystem-safe: no path separators that could escape the images/ directory.
+        #expect(!first.contains("/"))
+    }
+}
+
+// MARK: - Pure HTML rewrite (localize + placeholder)
 
 struct ResearchImageRewriteTests {
 
@@ -162,55 +242,87 @@ struct ResearchImageRewriteTests {
         let html = """
         <div><img src="https://good.example/ok.jpg"><img src="https://bad.example/dead.png"></div>
         """
-        let rewritten = ResearchImageValidator.rewriteHTMLReplacingInvalidImages(
+        let rewritten = ResearchImageValidator.rewriteHTMLLocalizingImages(
             html: html,
+            localRelativePathBySource: [:],
             invalidSourceURLs: ["https://bad.example/dead.png"]
         )
-        // The good image survives verbatim.
+        // The un-listed image survives verbatim.
         #expect(rewritten.contains("<img src=\"https://good.example/ok.jpg\">"))
         // The bad image is gone, replaced by the placeholder.
         #expect(!rewritten.contains("https://bad.example/dead.png"))
         #expect(rewritten.contains("Image unavailable"))
     }
 
-    @Test func leavesHTMLUntouchedWhenNothingIsInvalid() {
+    @Test func leavesHTMLUntouchedWhenNothingIsLocalizedOrInvalid() {
         let html = "<div><img src=\"https://good.example/ok.jpg\"></div>"
-        let rewritten = ResearchImageValidator.rewriteHTMLReplacingInvalidImages(
+        let rewritten = ResearchImageValidator.rewriteHTMLLocalizingImages(
             html: html,
+            localRelativePathBySource: [:],
             invalidSourceURLs: []
         )
         #expect(rewritten == html)
     }
 
-    @Test func replacesAllOccurrencesOfARepeatedBrokenSource() {
-        let html = """
-        <img src="https://bad.example/x.png"><p>mid</p><img src="https://bad.example/x.png">
-        """
-        let rewritten = ResearchImageValidator.rewriteHTMLReplacingInvalidImages(
+    @Test func localizesADownloadedImageSourceToItsLocalPathPreservingOtherAttributes() {
+        let html = "<div><img src=\"https://good.example/ok.jpg\" alt=\"a cat\" width=\"200\"></div>"
+        let rewritten = ResearchImageValidator.rewriteHTMLLocalizingImages(
             html: html,
-            invalidSourceURLs: ["https://bad.example/x.png"]
+            localRelativePathBySource: ["https://good.example/ok.jpg": "images/img-abc123.jpg"],
+            invalidSourceURLs: []
         )
-        #expect(!rewritten.contains("https://bad.example/x.png"))
-        // The surrounding markup is preserved.
-        #expect(rewritten.contains("<p>mid</p>"))
-        // Both images became placeholders.
-        let placeholderCount = rewritten.components(separatedBy: "Image unavailable").count - 1
-        #expect(placeholderCount == 2)
+        // The remote URL is gone; the src now points at the LOCAL file.
+        #expect(!rewritten.contains("https://good.example/ok.jpg"))
+        #expect(rewritten.contains("src=\"images/img-abc123.jpg\""))
+        // The other attributes on the tag are preserved.
+        #expect(rewritten.contains("alt=\"a cat\""))
+        #expect(rewritten.contains("width=\"200\""))
     }
 
-    @Test func replacesAnUnquotedBrokenSource() {
-        let html = "<div><img src=https://bad.example/raw.jpg width=100></div>"
-        let rewritten = ResearchImageValidator.rewriteHTMLReplacingInvalidImages(
+    @Test func localizesAndPlaceholdersInTheSamePass() {
+        let html = """
+        <div><img src="https://good.example/ok.jpg"><img src="https://bad.example/dead.png"></div>
+        """
+        let rewritten = ResearchImageValidator.rewriteHTMLLocalizingImages(
             html: html,
-            invalidSourceURLs: ["https://bad.example/raw.jpg"]
+            localRelativePathBySource: ["https://good.example/ok.jpg": "images/img-ok.jpg"],
+            invalidSourceURLs: ["https://bad.example/dead.png"]
         )
-        #expect(!rewritten.contains("https://bad.example/raw.jpg"))
+        #expect(rewritten.contains("src=\"images/img-ok.jpg\""))
+        #expect(!rewritten.contains("https://good.example/ok.jpg"))
+        #expect(!rewritten.contains("https://bad.example/dead.png"))
         #expect(rewritten.contains("Image unavailable"))
-        #expect(rewritten.contains("<div>"))
+    }
+
+    @Test func localizesAllOccurrencesOfARepeatedSource() {
+        let html = """
+        <img src="https://good.example/x.png"><p>mid</p><img src="https://good.example/x.png">
+        """
+        let rewritten = ResearchImageValidator.rewriteHTMLLocalizingImages(
+            html: html,
+            localRelativePathBySource: ["https://good.example/x.png": "images/img-x.png"],
+            invalidSourceURLs: []
+        )
+        #expect(!rewritten.contains("https://good.example/x.png"))
+        #expect(rewritten.contains("<p>mid</p>"))
+        let localizedCount = rewritten.components(separatedBy: "src=\"images/img-x.png\"").count - 1
+        #expect(localizedCount == 2)
+    }
+
+    @Test func localizesAnUnquotedSource() {
+        let html = "<div><img src=https://good.example/raw.jpg width=100></div>"
+        let rewritten = ResearchImageValidator.rewriteHTMLLocalizingImages(
+            html: html,
+            localRelativePathBySource: ["https://good.example/raw.jpg": "images/img-raw.jpg"],
+            invalidSourceURLs: []
+        )
+        // The unquoted remote src is normalized to a quoted local src; width preserved.
+        #expect(!rewritten.contains("https://good.example/raw.jpg"))
+        #expect(rewritten.contains("src=\"images/img-raw.jpg\""))
+        #expect(rewritten.contains("width=100"))
     }
 
     @Test func placeholderIsSelfContainedInlineOnly() {
-        // The placeholder must not introduce any external dependency.
         let placeholder = ResearchImageValidator.brokenImagePlaceholderHTML
         #expect(placeholder.contains("style="))
         #expect(!placeholder.lowercased().contains("http://"))
@@ -221,96 +333,103 @@ struct ResearchImageRewriteTests {
 
 // MARK: - Collector seal semantics (deterministic, scheduler-independent)
 
-struct ConfirmedValidSourceCollectorSealTests {
+struct ConfirmedDownloadedImageCollectorSealTests {
 
     /// The core of the budget race fix, proven WITHOUT any scheduling dependency:
     /// a record made BEFORE the seal is returned by `sealAndSnapshot()`, and a record
     /// made AFTER the seal is REJECTED. Against a collector lacking the `isSealed`
-    /// guard, the post-seal record would wrongly appear — so this deterministically
-    /// fails-before / passes-after for the seal mechanism itself.
-    @Test func sealRejectsPostSealRecordsAndReturnsExactlyThePreSealSet() async {
-        let collector = ConfirmedValidSourceCollector()
+    /// guard, the post-seal record would wrongly appear.
+    @Test func sealRejectsPostSealRecordsAndReturnsExactlyThePreSealMap() async {
+        let collector = ConfirmedDownloadedImageCollector()
 
         // Recorded BEFORE the seal → must be in the sealed snapshot.
-        await collector.recordValid(sourceURLString: "https://a.example/pre.jpg")
+        await collector.recordDownloaded(
+            sourceURLString: "https://a.example/pre.jpg",
+            payload: DownloadedImagePayload(data: fakeJPEGData, contentType: "image/jpeg")
+        )
 
         let sealedSnapshot = await collector.sealAndSnapshot()
-        #expect(sealedSnapshot == ["https://a.example/pre.jpg"])
+        #expect(Set(sealedSnapshot.keys) == ["https://a.example/pre.jpg"])
 
         // Recorded AFTER the seal → must be ignored.
-        await collector.recordValid(sourceURLString: "https://b.example/post.jpg")
+        await collector.recordDownloaded(
+            sourceURLString: "https://b.example/post.jpg",
+            payload: DownloadedImagePayload(data: Data([0x01]), contentType: nil)
+        )
 
         let afterSeal = await collector.snapshotForTesting()
-        #expect(afterSeal.contains("https://a.example/pre.jpg"))
-        #expect(!afterSeal.contains("https://b.example/post.jpg"))
-        // The set is unchanged by the rejected post-seal record.
-        #expect(afterSeal == sealedSnapshot)
+        #expect(afterSeal.keys.contains("https://a.example/pre.jpg"))
+        #expect(!afterSeal.keys.contains("https://b.example/post.jpg"))
+        // The map is unchanged by the rejected post-seal record.
+        #expect(Set(afterSeal.keys) == Set(sealedSnapshot.keys))
     }
 }
 
 // MARK: - Time-bounded orchestrator (through the injected fake)
 
-struct ResearchImageValidationOrchestratorTests {
+struct ResearchImageLocalizationOrchestratorTests {
 
-    @Test func invalidSetIsEveryUnconfirmedSource() async {
-        let fake = FakeImageURLValidator(resultsByAbsoluteString: [
-            "https://good.example/a.jpg": .valid,
-            "https://bad.example/b.jpg": .invalid,
+    @Test func downloadedMapIsEveryConfirmedSource() async {
+        let fake = FakeImageDownloader(outcomesByAbsoluteString: [
+            "https://good.example/a.jpg": .downloaded(data: fakeJPEGData, contentType: "image/jpeg"),
+            "https://bad.example/b.jpg": .failed,
         ])
-        let invalid = await ResearchImageValidator.determineInvalidImageSourceURLs(
+        let downloads = await ResearchImageValidator.downloadImageSources(
             sourceURLStrings: [
                 "https://good.example/a.jpg",
                 "https://bad.example/b.jpg",
-                "https://unknown.example/c.jpg", // defaults to invalid
+                "https://unknown.example/c.jpg", // defaults to .failed
             ],
-            validator: fake,
+            downloader: fake,
             config: .default
         )
-        #expect(invalid == ["https://bad.example/b.jpg", "https://unknown.example/c.jpg"])
+        // Only the single confirmed download; the failed + unknown are absent (the
+        // caller drops them to placeholders).
+        #expect(Set(downloads.keys) == ["https://good.example/a.jpg"])
     }
 
     @Test func ampersandEntitiesAreDecodedWhenFetching() async {
         // The raw src carries `&amp;`; the fetch must decode it to `&` so the real URL
-        // is validated, but the INVALID-set key stays the raw src (so the rewrite matches).
+        // is downloaded, but the map key stays the RAW src (so the rewrite matches).
         let rawSource = "https://img.example/p?a=1&amp;b=2"
         let decodedAbsolute = "https://img.example/p?a=1&b=2"
-        let fake = FakeImageURLValidator(resultsByAbsoluteString: [decodedAbsolute: .valid])
-        let invalid = await ResearchImageValidator.determineInvalidImageSourceURLs(
+        let fake = FakeImageDownloader(outcomesByAbsoluteString: [
+            decodedAbsolute: .downloaded(data: fakeJPEGData, contentType: "image/jpeg"),
+        ])
+        let downloads = await ResearchImageValidator.downloadImageSources(
             sourceURLStrings: [rawSource],
-            validator: fake,
+            downloader: fake,
             config: .default
         )
-        // The decoded URL validated as valid, so the raw source is NOT in the invalid set.
-        #expect(invalid.isEmpty)
-        let asked = await fake.validatedURLStrings()
+        #expect(Set(downloads.keys) == [rawSource])
+        let asked = await fake.requestedURLStrings()
         #expect(asked == [decodedAbsolute])
     }
 
     @Test func budgetFailSafeDropsUnverifiedImages() async {
-        // A validator that never returns within the budget → the image is dropped
-        // (treated invalid) rather than hanging the run.
-        let fake = FakeImageURLValidator(
-            resultsByAbsoluteString: ["https://slow.example/z.jpg": .valid],
+        // A downloader that never returns within the budget → the image is dropped
+        // (absent from the map) rather than hanging the run.
+        let fake = FakeImageDownloader(
+            outcomesByAbsoluteString: [
+                "https://slow.example/z.jpg": .downloaded(data: fakeJPEGData, contentType: "image/jpeg"),
+            ],
             artificialDelayNanoseconds: 5_000_000_000 // 5s, far past the 100ms budget
         )
         var config = ResearchImageValidationConfig.default
         config.totalBudgetSeconds = 0.1
-        let invalid = await ResearchImageValidator.determineInvalidImageSourceURLs(
+        let downloads = await ResearchImageValidator.downloadImageSources(
             sourceURLStrings: ["https://slow.example/z.jpg"],
-            validator: fake,
+            downloader: fake,
             config: config
         )
-        #expect(invalid == ["https://slow.example/z.jpg"])
+        #expect(downloads.isEmpty)
     }
 
-    @Test func lateValidAfterBudgetIsDroppedNotKept() async {
-        // A validator whose `.valid` result arrives only AFTER the budget cancels the
-        // run. The post-validate cancellation re-check + the collector seal must ensure
-        // that late `.valid` is NOT recorded, so all these images are DROPPED (invalid).
-        // Fail-before/pass-after: against the pre-fix code (no re-check, no seal) a late
-        // valid could be recorded before the snapshot and the image wrongly kept; with
-        // the fix, every not-yet-confirmed image is dropped deterministically.
-        let adversary = ReturnsValidAfterCancellationValidator()
+    @Test func lateDownloadAfterBudgetIsDroppedNotKept() async {
+        // A downloader whose payload arrives only AFTER the budget cancels the run. The
+        // post-download cancellation re-check + the collector seal must ensure that late
+        // payload is NOT recorded, so all these images are DROPPED.
+        let adversary = ReturnsDownloadedAfterCancellationDownloader()
         var config = ResearchImageValidationConfig.default
         config.totalBudgetSeconds = 0.1
         let sources = [
@@ -321,44 +440,96 @@ struct ResearchImageValidationOrchestratorTests {
             "https://a.example/5.jpg",
             "https://a.example/6.jpg",
         ]
-        let invalid = await ResearchImageValidator.determineInvalidImageSourceURLs(
+        let downloads = await ResearchImageValidator.downloadImageSources(
             sourceURLStrings: sources,
-            validator: adversary,
+            downloader: adversary,
             config: config
         )
-        // EVERY source is dropped — none of the late valids survived.
-        #expect(invalid == Set(sources))
+        // NONE of the late payloads survived.
+        #expect(downloads.isEmpty)
     }
 
-    @Test func validateAndRewriteReplacesBrokenImagesOnDisk() async throws {
+    @Test func validateAndRewriteLocalizesGoodImagesAndPlaceholdersBrokenOnDisk() async throws {
         let temporaryDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("clawdy-imgval-test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
 
         let reportURL = temporaryDirectory.appendingPathComponent("report.html")
+        let goodSource = "https://good.example/ok.jpg"
+        let badSource = "https://bad.example/dead.png"
         let html = """
         <html><body>
-          <img src="https://good.example/ok.jpg">
-          <img src="https://bad.example/dead.png">
+          <img src="\(goodSource)">
+          <img src="\(badSource)">
         </body></html>
         """
         try html.write(to: reportURL, atomically: true, encoding: .utf8)
 
-        let fake = FakeImageURLValidator(resultsByAbsoluteString: [
-            "https://good.example/ok.jpg": .valid,
-            "https://bad.example/dead.png": .invalid,
+        let downloader = FakeImageDownloader(outcomesByAbsoluteString: [
+            goodSource: .downloaded(data: fakeJPEGData, contentType: "image/jpeg"),
+            badSource: .failed,
         ])
         await ResearchImageValidator.validateAndRewriteDeliverable(
             fileURL: reportURL,
-            validator: fake,
+            downloader: downloader,
             config: .default
         )
 
         let rewritten = try String(contentsOf: reportURL, encoding: .utf8)
-        #expect(rewritten.contains("https://good.example/ok.jpg"))
-        #expect(!rewritten.contains("https://bad.example/dead.png"))
+
+        // The good image was LOCALIZED: the remote URL is gone and the src now points at
+        // the stable local file under images/.
+        #expect(!rewritten.contains(goodSource))
+        let expectedLocalName = ResearchImageValidator.localImageFileName(
+            forSourceURLString: goodSource, fileExtension: "jpg"
+        )
+        #expect(rewritten.contains("images/\(expectedLocalName)"))
+
+        // …and that local file actually exists on disk under the read-access output dir,
+        // with the downloaded bytes.
+        let imagesDirectory = temporaryDirectory.appendingPathComponent("images", isDirectory: true)
+        let localImageURL = imagesDirectory.appendingPathComponent(expectedLocalName)
+        #expect(FileManager.default.fileExists(atPath: localImageURL.path))
+        let writtenBytes = try Data(contentsOf: localImageURL)
+        #expect(writtenBytes == fakeJPEGData)
+
+        // The broken image is gone, replaced by the inline placeholder.
+        #expect(!rewritten.contains(badSource))
         #expect(rewritten.contains("Image unavailable"))
+    }
+
+    @Test func validateAndRewriteDerivesTheExtensionFromContentTypeWhenBytesAreUnsniffable() async throws {
+        let temporaryDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("clawdy-imgval-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let reportURL = temporaryDirectory.appendingPathComponent("report.html")
+        // A source with no image extension; the bytes don't sniff → extension must come
+        // from the Content-Type (webp).
+        let source = "https://cdn.example/asset?id=42"
+        try "<img src=\"\(source)\">".write(to: reportURL, atomically: true, encoding: .utf8)
+
+        let downloader = FakeImageDownloader(outcomesByAbsoluteString: [
+            source: .downloaded(data: Data([0x01, 0x02, 0x03, 0x04]), contentType: "image/webp"),
+        ])
+        await ResearchImageValidator.validateAndRewriteDeliverable(
+            fileURL: reportURL,
+            downloader: downloader,
+            config: .default
+        )
+
+        let expectedLocalName = ResearchImageValidator.localImageFileName(
+            forSourceURLString: source, fileExtension: "webp"
+        )
+        let rewritten = try String(contentsOf: reportURL, encoding: .utf8)
+        #expect(rewritten.contains("images/\(expectedLocalName)"))
+        #expect(expectedLocalName.hasSuffix(".webp"))
+        let localImageURL = temporaryDirectory
+            .appendingPathComponent("images", isDirectory: true)
+            .appendingPathComponent(expectedLocalName)
+        #expect(FileManager.default.fileExists(atPath: localImageURL.path))
     }
 
     @Test func validateAndRewriteIsANoOpWhenNoRemoteImages() async throws {
@@ -371,13 +542,17 @@ struct ResearchImageValidationOrchestratorTests {
         let html = "<html><body><p>No images here.</p></body></html>"
         try html.write(to: reportURL, atomically: true, encoding: .utf8)
 
-        let fake = FakeImageURLValidator(resultsByAbsoluteString: [:])
+        let downloader = FakeImageDownloader(outcomesByAbsoluteString: [:])
         await ResearchImageValidator.validateAndRewriteDeliverable(
             fileURL: reportURL,
-            validator: fake,
+            downloader: downloader,
             config: .default
         )
         let after = try String(contentsOf: reportURL, encoding: .utf8)
         #expect(after == html)
+        // No images/ directory is created when there's nothing to localize.
+        #expect(!FileManager.default.fileExists(
+            atPath: temporaryDirectory.appendingPathComponent("images").path
+        ))
     }
 }
