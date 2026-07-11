@@ -629,6 +629,57 @@ struct ResearchRecentsDismissPersistenceTests {
         #expect(row.isDismissed == true)
     }
 
+    /// R1: `recordSessionUndismissed` is the durable INVERSE of `recordSessionDismissed`
+    /// — a dismissed session's flag is cleared (reads as not-dismissed) and the clearing
+    /// survives a fresh store (relaunch). This is what an accepted follow-up uses to
+    /// reactivate a previously-dismissed session in History/recents.
+    @Test func recordSessionUndismissedClearsFlagDurably() {
+        let manifestURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("recents-undismiss-\(UUID().uuidString).json")
+        let store = ResearchManifestStore(fileURL: manifestURL)
+        defer { try? FileManager.default.removeItem(at: manifestURL) }
+
+        store.recordResearchSessionStarted(
+            sessionId: "sess-u", title: "U", task: "research u",
+            workingDir: "/tmp/u", transcriptPath: "/tmp/u/sess-u.jsonl"
+        )
+        store.recordSessionDismissed(sessionId: "sess-u", dismissed: true)
+        #expect(store.loadSessions().first?.dismissed == true)
+
+        // Un-dismiss (reactivation) clears the flag…
+        store.recordSessionUndismissed(sessionId: "sess-u")
+        #expect(store.loadSessions().first?.dismissed != true)
+        // …and the clearing is durable across a relaunch (fresh store, same file).
+        let reopened = ResearchManifestStore(fileURL: manifestURL)
+        #expect(reopened.loadSessions().first?.dismissed != true)
+        // The History row now reads as not-dismissed again.
+        let row = HistoryRowBuilder.makeRow(from: reopened.loadSessions().first!, now: Date())
+        #expect(row.isDismissed == false)
+    }
+
+    /// Un-dismissing is a safe no-op for an unknown session AND for a never-dismissed one
+    /// (it must not fabricate an entry or write `dismissed: false` onto an entry whose flag
+    /// was absent — so a routine follow-up on a never-dismissed session rewrites nothing).
+    @Test func recordSessionUndismissedIsNoOpForUnknownOrNeverDismissedSession() {
+        let manifestURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("recents-undismiss-noop-\(UUID().uuidString).json")
+        let store = ResearchManifestStore(fileURL: manifestURL)
+        defer { try? FileManager.default.removeItem(at: manifestURL) }
+
+        // Unknown id → no entry created.
+        store.recordSessionUndismissed(sessionId: "nope")
+        #expect(store.loadSessions().isEmpty)
+
+        // A never-dismissed entry keeps its absent (nil) flag — not rewritten to false.
+        store.recordResearchSessionStarted(
+            sessionId: "sess-fresh", title: "Fresh", task: "research fresh",
+            workingDir: "/tmp/fresh", transcriptPath: "/tmp/fresh/sess-fresh.jsonl"
+        )
+        #expect(store.loadSessions().first?.dismissed == nil)
+        store.recordSessionUndismissed(sessionId: "sess-fresh")
+        #expect(store.loadSessions().first?.dismissed == nil, "a never-dismissed entry stays untouched (nil, not false)")
+    }
+
     /// A missing session id is a safe no-op (never crashes, never creates an entry).
     @Test func recordSessionDismissedIsNoOpForUnknownSession() {
         let manifestURL = URL(fileURLWithPath: NSTemporaryDirectory())

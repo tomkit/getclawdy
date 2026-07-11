@@ -733,6 +733,94 @@ struct ResearchFrontmostFollowUpTests {
         )
     }
 
+    /// R2 — the GATED selection the router actually uses: a bound results window resolves
+    /// as a follow-up target ONLY when Clawdy is the active app AND that window is the
+    /// key/main (genuinely-focused) one. This is what stops the follow-up from landing on a
+    /// BACKGROUND results window (wrong session) or routing while the user is in another app.
+    @Test func activeFrontmostSelectionRequiresAppActiveAndAKeyOrMainResultsWindow() {
+        let bindings = [101: "sess-A", 202: "sess-B"]
+
+        // Genuinely active: Clawdy active, window 202 (sess-B) is key/main and frontmost of
+        // the focused candidates → sess-B.
+        #expect(
+            ResearchResultsWindowRegistry.activeFrontmostSessionID(
+                applicationIsActive: true,
+                inFrontToBackWindowNumbers: [202, 101],
+                keyOrMainWindowNumbers: [202],
+                bindings: bindings
+            ) == "sess-B"
+        )
+
+        // Clawdy NOT the active app → nil, even though a results window is frontmost and
+        // key. The user is looking at another app; nothing routes.
+        #expect(
+            ResearchResultsWindowRegistry.activeFrontmostSessionID(
+                applicationIsActive: false,
+                inFrontToBackWindowNumbers: [202, 101],
+                keyOrMainWindowNumbers: [202],
+                bindings: bindings
+            ) == nil
+        )
+
+        // App active but the results windows are only BACKGROUND (a non-results window, id
+        // 999, holds key/main) → nil. A background results window is never surfaced.
+        #expect(
+            ResearchResultsWindowRegistry.activeFrontmostSessionID(
+                applicationIsActive: true,
+                inFrontToBackWindowNumbers: [999, 202, 101],
+                keyOrMainWindowNumbers: [999],
+                bindings: bindings
+            ) == nil
+        )
+
+        // App active, no key/main window at all → nil (clean fallback).
+        #expect(
+            ResearchResultsWindowRegistry.activeFrontmostSessionID(
+                applicationIsActive: true,
+                inFrontToBackWindowNumbers: [202, 101],
+                keyOrMainWindowNumbers: [],
+                bindings: bindings
+            ) == nil
+        )
+
+        // Two results windows both key/main-eligible → the FRONTMOST one wins (front-to-back
+        // order is preserved among the focused candidates): sess-A is in front of sess-B.
+        #expect(
+            ResearchResultsWindowRegistry.activeFrontmostSessionID(
+                applicationIsActive: true,
+                inFrontToBackWindowNumbers: [101, 202],
+                keyOrMainWindowNumbers: [101, 202],
+                bindings: bindings
+            ) == "sess-A"
+        )
+    }
+
+    /// R2, through the instance method + injected AppKit state: a bound results window is a
+    /// follow-up target only while Clawdy is active AND it is the key/main window. Flipping
+    /// either gate off resolves nil cleanly (so the caller falls back instead of misrouting).
+    @Test func instanceFrontmostSessionIDHonorsTheAppActiveAndKeyMainGates() {
+        let registry = ResearchResultsWindowRegistry()
+        registry.bind(windowNumber: 42, sessionID: "sess-live")
+        registry.orderedWindowNumbersProvider = { [42] }
+
+        // Genuinely active → resolves.
+        registry.applicationIsActiveProvider = { true }
+        registry.keyOrMainWindowNumbersProvider = { [42] }
+        #expect(registry.frontmostSessionID() == "sess-live",
+                "an active, key/main results window is the follow-up target")
+
+        // App not active → nil.
+        registry.applicationIsActiveProvider = { false }
+        #expect(registry.frontmostSessionID() == nil,
+                "no target while Clawdy is not the active app")
+
+        // Active but the window is not key/main (a background results window) → nil.
+        registry.applicationIsActiveProvider = { true }
+        registry.keyOrMainWindowNumbersProvider = { [] }
+        #expect(registry.frontmostSessionID() == nil,
+                "no target when the bound results window isn't key/main")
+    }
+
     /// bind/unbind maintains the on-screen results-window → session map that
     /// `frontmostSessionID()` reads; an invalid window number is ignored.
     @Test func registryBindAndUnbindTrackTheOnScreenResultsWindow() {
@@ -929,16 +1017,20 @@ struct ResearchFrontmostFollowUpTests {
         // the user is actually looking at.
         companionManager.researchSessionManagerForTesting.setFocusedSessionIDForTesting("sess-focused")
 
-        // A frontmost results window bound to a different session, injected so the real
-        // resolver reads a deterministic front-to-back order.
+        // A GENUINELY-ACTIVE results window bound to a different session: Clawdy is the
+        // active app, and window 7 is both in the front-to-back order AND the key/main
+        // (focused) window — exactly the "the user is looking at this page" state.
         ResearchResultsWindowRegistry.shared.bind(windowNumber: 7, sessionID: "sess-frontmost")
         ResearchResultsWindowRegistry.shared.orderedWindowNumbersProvider = { [7] }
+        ResearchResultsWindowRegistry.shared.applicationIsActiveProvider = { true }
+        ResearchResultsWindowRegistry.shared.keyOrMainWindowNumbersProvider = { [7] }
 
         #expect(companionManager.resolveFollowUpTargetSessionIDForTesting() == "sess-frontmost",
-                "the frontmost results window's session must override the focused session")
+                "the genuinely-active results window's session must override the focused session")
 
         // No results window frontmost → fall back to the focused session (unchanged path).
         ResearchResultsWindowRegistry.shared.orderedWindowNumbersProvider = { [] }
+        ResearchResultsWindowRegistry.shared.keyOrMainWindowNumbersProvider = { [] }
         #expect(companionManager.resolveFollowUpTargetSessionIDForTesting() == "sess-focused",
                 "with no frontmost results window, the focused session is the fallback")
     }
@@ -1053,6 +1145,73 @@ struct ResearchOverlayUXRealPathTests {
         #expect(session.state == .stopped, "stop cancels the run")
         // Stop does not add the session to the dismissed set — a different mechanism.
         #expect(manager.dismissedSessionIDsForTesting.contains(sessionID) == false)
+    }
+
+    /// R1 (the reported bug): a follow-up on a PREVIOUSLY-DISMISSED live session must
+    /// UN-DISMISS it — clearing the dismissed state in BOTH the live `dismissedSessionIDs`
+    /// set AND the durable manifest flag — and RE-POP its toast into the visible stack, so
+    /// the reactivated run is visible again and no longer tagged "dismissed" in
+    /// recents/History.
+    ///
+    /// FAILS BEFORE the fix: nothing ever cleared either dismissed record on reactivation, so
+    /// the follow-up ran with its toast filtered out (never re-popped) and the session stayed
+    /// `dismissed` forever.
+    @Test func followUpOnADismissedSessionUndismissesItInBothPlacesAndRepopsTheToast() async throws {
+        let binary = try makeFollowUpFakeClaudeBinary()
+        let manager = makeFollowUpManager(binaryPath: binary)
+        defer { manager.stopAll() }
+
+        // A completed run with a live pill on the stack.
+        let sessionID = try await startAndCompleteFirstSession(manager)
+        #expect(manager.renderedPillCountForTesting == 1, "the completed pill is on the stack")
+
+        // DISMISS it — hidden from the stack, flagged dismissed in BOTH places.
+        manager.dismissSession(id: sessionID)
+        #expect(manager.renderedPillCountForTesting == 0, "dismiss hides the pill")
+        #expect(manager.dismissedSessionIDsForTesting.contains(sessionID), "the live dismissed set records it")
+        #expect(manager.manifestStoreForTesting.loadSessions().first(where: { $0.sessionId == sessionID })?.dismissed == true,
+                "the durable manifest flag records it")
+
+        // A follow-up (over the still-open results page) reactivates THIS session.
+        let routed = manager.followUpOnSession(id: sessionID, prompt: "QUESTION_ONLY which is quietest?")
+        #expect(routed == true, "the follow-up routes to the dismissed session, reactivating it")
+
+        // BOTH dismissed records are now cleared…
+        #expect(manager.dismissedSessionIDsForTesting.contains(sessionID) == false,
+                "the live dismissed set is cleared on reactivation")
+        #expect(manager.manifestStoreForTesting.loadSessions().first(where: { $0.sessionId == sessionID })?.dismissed != true,
+                "the durable manifest dismissed flag is cleared on reactivation")
+        // …and the toast is re-popped into the visible stack while the follow-up runs.
+        #expect(manager.renderedPillCountForTesting == 1, "the reactivated session's toast re-pops")
+        #expect(manager.sessionForTesting(id: sessionID)?.state == .executing,
+                "the reactivated session is running its follow-up turn")
+    }
+
+    /// R1, the NON-LIVE (History-opened / post-relaunch) path: a follow-up on a session that
+    /// is only in the manifest (its live pill long gone) but is flagged `dismissed` there must
+    /// still clear that DURABLE flag when it reconstructs + reactivates the session — so a
+    /// reactivated run isn't left tagged "dismissed" in recents/History. The live set was
+    /// never involved (this manager never had the session live), so only the manifest flag
+    /// matters here.
+    @Test func followUpOnAReconstructedDismissedSessionClearsTheDurableManifestFlag() {
+        let sessionID = "sess-history-dismissed-\(UUID().uuidString.lowercased())"
+        let manager = makeManagerWithSeededCompletedSession(sessionID: sessionID, binaryPath: "/usr/bin/true")
+        defer { manager.stopAll() }
+
+        // The finished, NON-live session is durably flagged dismissed in the manifest.
+        manager.manifestStoreForTesting.recordSessionDismissed(sessionId: sessionID, dismissed: true)
+        #expect(manager.manifestStoreForTesting.loadSessions().first(where: { $0.sessionId == sessionID })?.dismissed == true)
+        #expect(manager.sessionForTesting(id: sessionID) == nil, "nothing live yet — only the manifest knows it")
+
+        // A follow-up over its History-opened page reconstructs + reactivates it.
+        let routed = manager.followUpOnSession(id: sessionID, prompt: "QUESTION_ONLY and the cheapest?")
+        #expect(routed == true, "the non-live dismissed session reconstructs and routes the follow-up")
+
+        // The durable dismissed flag is cleared on reactivation.
+        #expect(manager.manifestStoreForTesting.loadSessions().first(where: { $0.sessionId == sessionID })?.dismissed != true,
+                "reconstructing + reactivating a dismissed session clears its durable manifest flag")
+        #expect(manager.dismissedSessionIDsForTesting.contains(sessionID) == false,
+                "the reconstructed session is not in the live dismissed set")
     }
 }
 

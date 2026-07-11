@@ -296,6 +296,28 @@ final class ResearchManifestStore: @unchecked Sendable {
         writeManifestLocked(manifest)
     }
 
+    /// Clears the DISPLAY-only `dismissed` flag — the inverse of `recordSessionDismissed`.
+    /// Called when an accepted follow-up REACTIVATES a previously-dismissed session, so
+    /// the recents / History lists stop dimming + tagging it "dismissed" durably. Like its
+    /// inverse it deliberately does NOT touch `status` or `updatedAt` — reactivation's own
+    /// lifecycle writes handle those, and un-dismiss must not reorder the lists. No-op if
+    /// the session is absent OR was never dismissed (an entry whose flag is already nil/false
+    /// is left byte-for-byte untouched, so a routine follow-up on a never-dismissed session
+    /// rewrites nothing).
+    func recordSessionUndismissed(sessionId: String) {
+        accessLock.lock()
+        defer { accessLock.unlock() }
+        var manifest = readManifestLocked()
+        guard let index = manifest.sessions.firstIndex(where: { $0.sessionId == sessionId }) else {
+            return
+        }
+        guard manifest.sessions[index].dismissed == true else {
+            return
+        }
+        manifest.sessions[index].dismissed = false
+        writeManifestLocked(manifest)
+    }
+
     /// Inserts `entry`, or replaces an existing entry with the same `sessionId` while
     /// PRESERVING that entry's original `createdAt`. A SINGLE locked read-modify-write,
     /// so the createdAt preservation can't race a concurrent writer (the background

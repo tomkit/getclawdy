@@ -312,7 +312,11 @@ final class ResearchSessionManager: ObservableObject {
         // Honor the session's honest acceptance: a focused-but-non-resumable session
         // (`.idle`/`.failed`/`.stopped`) refuses, and this must report that (false) rather
         // than claim it routed — so no caller silently drops the follow-up.
-        return focusedSession.followUp(prompt: prompt)
+        let routed = focusedSession.followUp(prompt: prompt)
+        if routed {
+            reactivateDismissedSessionAfterAcceptedFollowUp(id: focusedSessionID)
+        }
+        return routed
     }
 
     /// Routes a spoken utterance to a SPECIFIC research session as a voice-native
@@ -334,13 +338,40 @@ final class ResearchSessionManager: ObservableObject {
         // can refuse (a `.idle`/`.failed`/`.stopped` state that turned non-resumable after the
         // composer last reconciled), so honor its own acceptance signal rather than assuming
         // routing — otherwise a stale History composer would clear a draft that never routed.
+        let routed: Bool
         if let liveSession = sessionsByID[sessionID] {
-            return liveSession.followUp(prompt: prompt)
-        }
-        guard let reconstructedSession = reconstructFinishedSession(forSessionID: sessionID) else {
+            routed = liveSession.followUp(prompt: prompt)
+        } else if let reconstructedSession = reconstructFinishedSession(forSessionID: sessionID) {
+            routed = reconstructedSession.followUp(prompt: prompt)
+        } else {
             return false
         }
-        return reconstructedSession.followUp(prompt: prompt)
+        // A follow-up that ACTUALLY routed REACTIVATES the session — so if it had been
+        // dismissed (its × hidden the toast, or it aged out) we must UN-dismiss it, else the
+        // reactivated run would keep running with its toast filtered out and stay tagged
+        // "dismissed" in recents/History forever.
+        if routed {
+            reactivateDismissedSessionAfterAcceptedFollowUp(id: sessionID)
+        }
+        return routed
+    }
+
+    /// Un-dismisses a session that an accepted follow-up just REACTIVATED, clearing the
+    /// dismissed state in BOTH places it is recorded and re-popping its toast:
+    ///   - the LIVE `dismissedSessionIDs` set (covers a same-session dismiss → follow-up,
+    ///     where the session stayed in `sessionsByID` the whole time), and
+    ///   - the DURABLE manifest `dismissed` flag (covers a session reactivated after
+    ///     relaunch — its live set was empty but the manifest still tagged it dismissed).
+    /// Only re-pops the toast (`refreshOverlay`) when the session had actually been hidden
+    /// from the live stack; the reconstruction path already refreshes, and a follow-up on a
+    /// never-dismissed session leaves the visible stack unchanged. Called ONLY when the
+    /// follow-up was honestly accepted, so a refused follow-up never un-dismisses anything.
+    private func reactivateDismissedSessionAfterAcceptedFollowUp(id sessionID: ResearchSessionID) {
+        let wasLiveDismissed = dismissedSessionIDs.remove(sessionID) != nil
+        manifestStore.recordSessionUndismissed(sessionId: sessionID)
+        if wasLiveDismissed {
+            refreshOverlay()
+        }
     }
 
     /// The LIVE overlay phase of `sessionID` if it is a currently-live session, else nil
@@ -880,6 +911,9 @@ final class ResearchSessionManager: ObservableObject {
     func setFocusedSessionIDForTesting(_ id: ResearchSessionID?) { focusedSessionID = id }
     /// The set of currently-dismissed session ids (chrome hidden, run still live).
     var dismissedSessionIDsForTesting: Set<ResearchSessionID> { dismissedSessionIDs }
+    /// The injected manifest store, so a test can assert the DURABLE dismissed flag is
+    /// cleared when an accepted follow-up reactivates a previously-dismissed session.
+    var manifestStoreForTesting: ResearchManifestStore { manifestStore }
     /// The number of pills the overlay is currently rendering (post dismiss filter).
     var renderedPillCountForTesting: Int { stackedOverlay.renderedPillCountForTesting }
     /// Whether the overlay's detail/progress panel is currently on screen.
