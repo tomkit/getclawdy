@@ -21,3 +21,5 @@ evidence/
 .review-proofs/
 *_FINDINGS.md
 SCREEN_RECORDING_REFERENCE.md
+.vercel
+.env*
