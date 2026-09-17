@@ -6,20 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-
-### Changed
-- **Actions are now skills, in the standard SKILL.md format.** The `~/.clawdy/actions` format from 0.0.3 is replaced by `~/.clawdy/skills/<name>/SKILL.md`, the same file format as Claude Code / Codex skills (`name`, `description`, `allowed-tools`, markdown body) plus optional `clawdy-*` keys. The built-in `research/SKILL.md` is written on first launch.
-
-### Added
-- **Clawdy can run your own harness skills.** Skills in `~/.claude/skills` (or `~/.codex/skills` with Codex selected) are offered to the router as `[SKILL:name]`; a matching request runs the skill in a dedicated agent and the result is spoken back. A skill's `description` is the routing rule.
-- Skills without a page (`clawdy-deliverable: none`) speak their result instead of opening a results window.
-- The routing prompt is an editable file, `~/.clawdy/router.md`.
-- `trip-planner` ships as a second bundled skill and the example to copy.
-
 ## [0.0.3] - 2026-09-16
 
 ### Added
-- **Teach Clawdy new actions.** The warm agent's routing rules and the research prompts are now plain, editable files in `~/.clawdy/actions/`. The built-in `research/ACTION.md` is written there on first launch (edit it to retune research); add `<name>/ACTION.md` with a `tag`, a `## when` section and a `## execute-message` to give Clawdy a new long-running job that runs in its own agent and opens a page. Edits apply on the next question, no relaunch.
+- **Skills.** Clawdy can hand a spoken request to a skill that runs in its own agent. Your Claude Code skills (`~/.claude/skills`, or `~/.codex/skills` with Codex) work by voice with nothing to set up; the result is spoken back. Clawdy-specific skills live in `~/.clawdy/skills/<name>/SKILL.md`, the same format as Claude Code / Codex skills plus optional `clawdy-*` keys. `research` and an example `trip-planner` ship there on first launch; edit them or add your own. Changes apply on the next question.
+- **Editable routing prompt.** `~/.clawdy/router.md` is the prompt the voice agent uses to decide between answering inline and routing to a skill.
+- Skills without a page (`clawdy-deliverable: none`) speak their result instead of opening a results window.
 
 ### Changed
 - **The idle claw badge opens on click, not hover.** Hovering the resting badge no longer pops the recents list open; click it. Once open, moving the pointer off it still auto-collapses it.
