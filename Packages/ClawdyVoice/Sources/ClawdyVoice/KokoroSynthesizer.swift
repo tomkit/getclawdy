@@ -58,8 +58,22 @@ public actor KokoroSynthesizer {
     private let normalizer = SpokenTextNormalizer()
 
     /// Words the user wants said a specific way (`~/.clawdy/pronunciations.txt`), lowercase
-    /// word → Misaki phonemes. Applied before the G2P as `[word](/phonemes/)` markup.
+    /// word → Misaki phonemes. Applied before the G2P as `[word](/phonemes/)` markup, on top
+    /// of `builtInPronunciations` (a user entry for the same word wins).
     public var pronunciationOverrides: [String: String] = [:]
+
+    /// Pronunciations the lexicon gets wrong for words Clawdy itself says. Interjections are
+    /// the notable gap: misaki spells "mm-hm" as `mhm` (no vowel), which the model renders as
+    /// a broken "meh"; the dictionary transcription /əmˈhʌm/ is what a person says.
+    public static let builtInPronunciations: [String: String] = [
+        "mm-hm": "əmhˈʌm",
+        "mmhm": "əmhˈʌm",
+        "mm-hmm": "əmhˈʌm",
+        "uh-huh": "ʌhˈʌ",
+        "hmm": "hˈʌmm",
+        "hm": "hˈʌmm",
+        "clawdy": "klˈɔdi",
+    ]
 
     /// Loads the ONNX model at `modelURL` (the app bundles it; tests point at a downloaded copy).
     public init(modelURL: URL) throws {
@@ -88,7 +102,8 @@ public actor KokoroSynthesizer {
     /// The phonemes Kokoro will be fed for `text` (exposed for tests and tooling).
     public func phonemes(for text: String) -> String {
         let spoken = normalizer.normalize(text)
-        let marked = PronunciationOverrideMarkup.apply(overrides: pronunciationOverrides, to: spoken)
+        let overrides = Self.builtInPronunciations.merging(pronunciationOverrides) { _, userEntry in userEntry }
+        let marked = PronunciationOverrideMarkup.apply(overrides: overrides, to: spoken)
         return g2p.phonemize(text: marked).0
     }
 
@@ -244,7 +259,9 @@ public enum PronunciationOverrideMarkup {
             currentWord = ""
         }
         for character in text {
-            if character.isLetter || character.isNumber || character == "'" {
+            // A hyphen INSIDE a word ("mm-hm", "well-known") keeps the compound one key.
+            let isInnerHyphen = character == "-" && !currentWord.isEmpty
+            if character.isLetter || character.isNumber || character == "'" || isInnerHyphen {
                 currentWord.append(character)
             } else {
                 flushWord()

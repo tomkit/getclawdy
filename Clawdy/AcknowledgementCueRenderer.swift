@@ -32,7 +32,9 @@ struct AcknowledgementCueRenderer {
 
         var cacheDirectoryName: String {
             switch self {
-            case .kokoro(let voiceID): return "kokoro-" + Self.safe(voiceID)
+            // The version suffix invalidates the cache when Clawdy's built-in pronunciations
+            // change (the key is the phrase text, which doesn't).
+            case .kokoro(let voiceID): return "kokoro-" + Self.safe(voiceID) + "-v\(Self.kokoroRenderVersion)"
             case .apple(let identifier): return "apple-" + Self.safe(identifier ?? "default")
             case .elevenLabs(let voiceID): return "elevenlabs-" + Self.safe(voiceID)
             }
@@ -45,6 +47,8 @@ struct AcknowledgementCueRenderer {
             case .elevenLabs: return "mp3"
             }
         }
+
+        static let kokoroRenderVersion = 2
 
         private static func safe(_ value: String) -> String {
             String(value.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" || $0 == "." ? Character($0) : "_" })

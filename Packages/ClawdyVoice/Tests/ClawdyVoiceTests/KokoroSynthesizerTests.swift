@@ -64,9 +64,21 @@ final class KokoroSynthesizerTests: XCTestCase {
         XCTAssertEqual(PronunciationOverrideMarkup.apply(overrides: overrides, to: "Hey Clawdy, tomkit's here."),
                        "Hey [Clawdy](/klˈɔdi/), [tomkit](/tˈɑmkɪt/)'s here.")
         XCTAssertEqual(PronunciationOverrideMarkup.apply(overrides: [:], to: "unchanged"), "unchanged")
+        XCTAssertEqual(PronunciationOverrideMarkup.apply(overrides: ["mm-hm": "əmhˈʌm"], to: "mm-hm. ok"), "[mm-hm](/əmhˈʌm/). ok")
         let g2p = EnglishG2P(british: false)
         XCTAssertEqual(g2p.phonemize(text: PronunciationOverrideMarkup.apply(overrides: ["clawdy": "klˈɔːdi"], to: "clawdy is ready.")).0,
                        "klˈɔːdi ɪz ɹˈɛdi.")
+    }
+
+    func testBuiltInPronunciationsFixTheInterjectionsAndUserEntriesWin() async throws {
+        let synthesizer = try makeSynthesizer()
+        let mmhm = await synthesizer.phonemes(for: "mm-hm.")
+        XCTAssertEqual(mmhm, "əmhˈʌm.")
+        let hmm = await synthesizer.phonemes(for: "Hmm, okay.")
+        XCTAssertEqual(hmm, "hˈʌmm, ˌOkˈA.")
+        await synthesizer.setPronunciationOverrides(["clawdy": "klˈɔːdi"])
+        let userWins = await synthesizer.phonemes(for: "clawdy")
+        XCTAssertEqual(userWins, "klˈɔːdi")
     }
 
     func testNormalizerRules() {

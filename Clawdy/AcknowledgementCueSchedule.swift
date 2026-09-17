@@ -31,7 +31,7 @@ enum AcknowledgementCueSchedule {
     }
 
     static let `default`: [Step] = [
-        Step(delaySeconds: 1.0, phrases: ["mm-hm.", "okay.", "hmm."]),
+        Step(delaySeconds: 1.0, phrases: ["mm-hm.", "okay.", "got it."]),
         Step(delaySeconds: 3.0, phrases: ["let me look.", "let me check.", "one sec."]),
         Step(delaySeconds: 8.0, phrases: ["still checking.", "still on it.", "almost there."]),
         Step(delaySeconds: 15.0, phrases: ["this one's taking a bit.", "still working on it, hang on."])
