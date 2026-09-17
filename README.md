@@ -16,12 +16,12 @@
   <img src="assets/clawdy-hero.png" width="860" alt="Clawdy, a small red lobster, bursting out through a jagged hole in a shattered terminal window, next to a spreadsheet with a broken cell." />
 </p>
 
-Clawdy has no AI of its own. It runs on the Claude Code or Codex you already have installed. There's nothing new to sign up for and no separate bill, and your voice never leaves your Mac.
+Clawdy runs on your own local Claude Code or Codex using your subscription tokens.
 
 - **It sees what you see.** Every window, every app, every monitor.
 - **Just say it.** Hold **Control + Option** and talk. No typing, no prompts.
 - **It talks back.** Out loud, in plain words, while you keep working.
-- **It points.** The claw flies to the exact spot on your screen.
+- **It points.** The claw cursor points things out on your screen.
 
 <p align="center">
   <a href="https://github.com/tomkit/getclawdy/releases/latest/download/Clawdy.dmg">
@@ -29,7 +29,7 @@ Clawdy has no AI of its own. It runs on the Claude Code or Codex you already hav
   </a>
 </p>
 
-## Things you'd actually say
+## Ask questions like:
 
 - "What did I just break?"
 - "Which of these settings do I actually need on?"
@@ -37,9 +37,9 @@ Clawdy has no AI of its own. It runs on the Claude Code or Codex you already hav
 - "What do they actually want from me in this email?"
 - "Find me three laptops under $900 and put it on one page."
 
-Clawdy answers out loud and the claw lands on the button, toggle, field, or sentence it's talking about. For the big asks, it goes off, researches the web, and opens a page on your screen.
+Clawdy answers out loud and the claw points things out. For the bigger tasks, it leverages all the work you've put into your local harness and can leverage all the subagents, prompts, and plugins you've set up.
 
-## What it looks like
+## Example: planning a road trip
 
 **Point at your screen and talk.** Clawdy answers out loud and the claw flies to what it means.
 
@@ -58,7 +58,7 @@ Needs macOS 14.2 (Sonoma) or later. Works on Intel and Apple Silicon.
 
 Optional: add an [ElevenLabs](https://elevenlabs.io) key in the menu-bar panel for a nicer voice. Without it, Clawdy uses the voice built into macOS.
 
-## For the technically curious
+## Use your own CLI harness
 
 - **Your CLI, your tokens.** Clawdy shells out to the `claude` or `codex` binary on your machine. Every answer is billed to whatever subscription that CLI is signed into. No API keys, no proxy, no backend.
 - **Your whole setup comes along.** Clawdy runs your CLI as-is, so the CLAUDE.md, skills, plugins, hooks, and MCP servers you've set up all load, same as in your terminal.
@@ -67,27 +67,24 @@ Optional: add an [ElevenLabs](https://elevenlabs.io) key in the menu-bar panel f
 
 ## Skills and routing
 
-**The short version.** Most of what you ask Clawdy gets a quick spoken answer. Some things are bigger than a quick answer, like "research this and build me a page" or "plan me three days in Kyoto." For those, Clawdy hands the job to a *skill*: a separate agent that goes off, does the work, and comes back with a page on your screen or a spoken result. You don't pick the skill. Clawdy does.
+Clawdy can give quick spoken answers to most questions. For more complex questions, like "research this and build me a page" or "plan me three days in Kyoto", Clawdy can use your existing skills or Clawdy-specific skills which will trigger a separate agent that goes off, does the work, and comes back with a result.
 
 **How routing works.** Every question goes to Clawdy's voice agent first. It reads the list of skills it knows about and makes a call:
 
 - Quick and answerable right now (from your screen or general knowledge)? It just answers.
 - Needs the web, several steps, or a built artifact, or clearly matches a skill's description? It replies with a single line instead of talking, like `[RESEARCH] compare the three best standing desks under $1000 and build a page`, and Clawdy starts that skill in its own process.
-- "Where do I click?" style questions are always answered inline with the claw. Never routed.
-
-A skill's `description` is what the router reads to make that call, the same way Claude Code decides when to use one of its own skills.
 
 **Two kinds of skills.**
 
 1. *Your Claude Code skills.* Anything in `~/.claude/skills` (or `~/.codex/skills` if you use Codex) is already available by voice. Nothing to set up. Clawdy runs the skill in a dedicated `claude` session and reads the result back to you.
 2. *Clawdy skills.* Same `SKILL.md` format, but written for Clawdy's interface: voice in, and a page on your screen or a spoken answer out. They live in `~/.clawdy/skills`.
 
-**The bundled Clawdy skills.** Clawdy writes these to `~/.clawdy/skills` the first time it runs, so you can read them and change them:
+**Bundled Clawdy skills.**
 
 | Skill | You say | What happens |
 |---|---|---|
 | `research` | "Find the best noise-cancelling headphones and build me a page." | Researches the web, asks a clarifying question if it needs one, builds a self-contained page, and opens it. Keep talking to it to change the page. |
-| `trip-planner` | "Plan me three days in Kyoto." | Builds a day-by-day itinerary page with neighborhoods and places to eat. This one is the example to copy. |
+| `trip-planner` | "Plan me three days in Kyoto." | Builds a day-by-day itinerary page with neighborhoods and places to eat.
 
 Edit `research/SKILL.md` to change how research behaves. Changes apply on your next question; no relaunch.
 
