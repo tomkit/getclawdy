@@ -133,16 +133,8 @@ struct CompanionPanelView: View {
             //         .padding(.horizontal, DS.Spacing.lg)
             // }
 
-            if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
-                Spacer()
-                    .frame(height: 16)
-
-                historyButton
-                    .padding(.horizontal, DS.Spacing.lg)
-            }
-
             Spacer()
-                .frame(height: 12)
+                .frame(height: 16)
 
             Divider()
                 .background(DS.Colors.borderSubtle)
@@ -184,13 +176,6 @@ struct CompanionPanelView: View {
             switch section {
             case .engine:
                 enginePickerRow
-                // The "Use my Claude Code setup" toggle only affects the Claude engine,
-                // so it appears in the Engine section only when Claude Code is selected.
-                if CompanionSettingsLayout.showsClaudeCustomizationsRow(
-                    selectedEngineKind: companionManager.selectedEngineKind
-                ) {
-                    claudeCustomizationsToggleRow
-                }
                 if companionManager.selectedEngineKind != nil {
                     quickAnswerSpeedRows
                 }
@@ -215,6 +200,23 @@ struct CompanionPanelView: View {
         Rectangle()
             .fill(DS.Colors.borderSubtle.opacity(0.5))
             .frame(height: 1)
+    }
+
+    /// A small keycap for the hotkey hint.
+    private func keycap(_ label: String) -> some View {
+        Text(label)
+            .font(DS.Font.overlayCaption)
+            .foregroundColor(DS.Colors.textSecondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+            )
     }
 
     // MARK: - Header
@@ -266,23 +268,9 @@ struct CompanionPanelView: View {
             .pointerCursor()
             .menuButtonHover(Circle())
             .help("Stop")
-        } else {
-            Button(action: {
-                NotificationCenter.default.post(name: .clawdyDismissPanel, object: nil)
-            }) {
-                Image(systemName: "xmark")
-                    .font(DS.Font.microCaptionEmphasized)
-                    .foregroundColor(DS.Colors.textTertiary)
-                    .frame(width: 20, height: 20)
-                    .background(
-                        Circle()
-                            .fill(Color.white.opacity(0.08))
-                    )
-            }
-            .buttonStyle(.plain)
-            .pointerCursor()
-            .menuButtonHover(Circle())
         }
+        // No close button: the panel dismisses on any outside click (or Escape), so an ×
+        // only added a control to a panel that's meant to read as quiet.
     }
 
     // MARK: - Permissions Copy
@@ -290,10 +278,16 @@ struct CompanionPanelView: View {
     @ViewBuilder
     private var permissionsCopySection: some View {
         if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
-            Text("Hold Control+Option to talk.")
-                .font(DS.Font.overlayBody)
-                .foregroundColor(DS.Colors.textSecondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) {
+                Text("Hold")
+                keycap("⌃ Control")
+                Text("+")
+                keycap("⌥ Option")
+                Text("to talk")
+            }
+            .font(DS.Font.overlayCaptionRegular)
+            .foregroundColor(DS.Colors.textTertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if companionManager.allPermissionsGranted && !companionManager.hasSubmittedEmail {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Drop your email to get started.")
@@ -761,39 +755,6 @@ struct CompanionPanelView: View {
         .padding(.vertical, DS.Spacing.snug)
     }
 
-    // MARK: - Claude Code Customizations Toggle
-
-    /// The single "Use my Claude Code setup" setting: ON (default) loads the user's
-    /// own CLAUDE.md / skills / MCP / hooks on BOTH the quick-answer and research
-    /// paths; OFF isolates both runs with `--safe-mode`. Only meaningful for the
-    /// Claude engine, so the caller shows it only when Claude Code is selected.
-    private var claudeCustomizationsToggleRow: some View {
-        HStack {
-            HStack(spacing: 8) {
-                Image(systemName: "gearshape.2")
-                    .font(DS.Font.overlayBody)
-                    .foregroundColor(DS.Colors.textTertiary)
-                    .frame(width: 16)
-
-                Text("Use my Claude Code setup")
-                    .font(DS.Font.detailBody)
-                    .foregroundColor(DS.Colors.textSecondary)
-            }
-
-            Spacer()
-
-            Toggle("", isOn: Binding(
-                get: { companionManager.useClaudeCustomizations },
-                set: { companionManager.setUseClaudeCustomizations($0) }
-            ))
-            .toggleStyle(.switch)
-            .labelsHidden()
-            .tint(DS.Colors.accent)
-            .scaleEffect(0.8)
-        }
-        .menuRowHover()
-    }
-
     // MARK: - Quick-answer speed (Claude only)
 
     /// The warm quick-answer path's model and effort. Sonnet is the recommended default
@@ -804,12 +765,10 @@ struct CompanionPanelView: View {
         VStack(alignment: .leading, spacing: 8) {
             // Codex: no warm process and the model barely moves latency, so only the
             // effort row (its one real lever) is offered.
-            if companionManager.selectedEngineKind == .claudeCode {
+            if CompanionSettingsLayout.showsQuickAnswerModelRow(selectedEngineKind: companionManager.selectedEngineKind) {
             speedRow(
                 label: "Model",
-                icon: "hare",
-                hint: companionManager.quickAnswerSettings.model.detail,
-                options: QuickAnswerModel.allCases,
+                options: QuickAnswerModel.offeredCases,
                 title: { $0.displayName },
                 isSelected: { companionManager.quickAnswerSettings.model == $0 },
                 select: { model in
@@ -821,10 +780,6 @@ struct CompanionPanelView: View {
             }
             speedRow(
                 label: "Effort",
-                icon: "brain",
-                hint: companionManager.selectedEngineKind == .codex
-                    ? "default is low; medium is about 2× slower"
-                    : "how hard it thinks before answering",
                 options: QuickAnswerEffort.allCases,
                 title: { $0.displayName },
                 isSelected: { companionManager.quickAnswerSettings.effort == $0 },
@@ -839,28 +794,16 @@ struct CompanionPanelView: View {
 
     private func speedRow<Option: Identifiable>(
         label: String,
-        icon: String,
-        hint: String,
         options: [Option],
         title: @escaping (Option) -> String,
         isSelected: @escaping (Option) -> Bool,
         select: @escaping (Option) -> Void
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(DS.Font.overlayBody)
-                    .foregroundColor(DS.Colors.textTertiary)
-                    .frame(width: 16)
-                Text(label)
-                    .font(DS.Font.detailBody)
-                    .foregroundColor(DS.Colors.textSecondary)
-                Spacer()
-                Text(hint)
-                    .font(DS.Font.overlayCaptionRegular)
-                    .foregroundColor(DS.Colors.textTertiary)
-                    .lineLimit(1)
-            }
+        HStack(spacing: DS.Spacing.control) {
+            Text(label)
+                .font(DS.Font.overlayCaptionRegular)
+                .foregroundColor(DS.Colors.textTertiary)
+                .frame(width: 44, alignment: .leading)
             HStack(spacing: 0) {
                 ForEach(options) { option in
                     MenuSegmentOptionButton(
@@ -1201,45 +1144,29 @@ struct CompanionPanelView: View {
             }
             historyWindowController.show()
         }) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(DS.Font.overlayBody)
-                    // Brand-red accent so the History entry point reads as Clawdy's.
-                    .foregroundColor(DS.Colors.accent)
-
+                    .font(DS.Font.overlayCaption)
                 Text("History")
-                    .font(DS.Font.controlLabel)
+                    .font(DS.Font.overlayBody)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(DS.Font.microCaptionEmphasized)
-                    .foregroundColor(DS.Colors.textTertiary)
             }
             .foregroundColor(DS.Colors.textSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, DS.Spacing.md)
-            .padding(.vertical, DS.Spacing.control)
-            .background(
-                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
-                    .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
-            )
         }
         .buttonStyle(.plain)
         .pointerCursor()
-        .menuButtonHover(RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous))
+        .menuTextHover()
     }
 
     // MARK: - Footer
 
     private var footerSection: some View {
         HStack {
+            if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
+                historyButton
+                Spacer()
+            }
             Button(action: {
                 NSApp.terminate(nil)
             }) {
@@ -1556,7 +1483,9 @@ struct MenuSegmentOptionButton: View {
                 // brightens toward the secondary tone to signal it is clickable.
                 .foregroundColor(labelColor)
                 .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+                // Segments share their row's width equally, so every segmented control
+                // in the panel spans the same full width and ends on the same edge.
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, DS.Spacing.control)
                 .padding(.vertical, DS.Spacing.compact)
                 .background(
@@ -1587,7 +1516,10 @@ struct MenuSegmentOptionButton: View {
 /// grouping and top-to-bottom order can be unit-tested with no SwiftUI.
 enum CompanionSettingsControl: Equatable {
     case enginePicker
-    case claudeCustomizationsToggle
+    /// The quick-answer model segment (Claude only — Codex's model barely moves latency).
+    case quickAnswerModel
+    /// The quick-answer effort segment (both engines; it's Codex's one latency lever).
+    case quickAnswerEffort
     case ttsProvider
 }
 
@@ -1612,10 +1544,9 @@ enum CompanionSettingsLayout {
     /// The sections, top-to-bottom.
     static let orderedSections: [CompanionSettingsSection] = [.engine, .voice]
 
-    /// Whether the "Use my Claude Code setup" toggle appears in the Engine section — it is
-    /// only meaningful for the Claude engine, so it shows only when Claude Code is selected
-    /// (never when no engine is selected yet).
-    static func showsClaudeCustomizationsRow(selectedEngineKind: CoachEngineKind?) -> Bool {
+    /// Whether the quick-answer Model segment appears — only for Claude, where the model
+    /// choice is the measured lever (Sonnet ≈1s faster than Opus). Codex's isn't.
+    static func showsQuickAnswerModelRow(selectedEngineKind: CoachEngineKind?) -> Bool {
         selectedEngineKind == .claudeCode
     }
 
@@ -1627,8 +1558,11 @@ enum CompanionSettingsLayout {
         switch section {
         case .engine:
             var controls: [CompanionSettingsControl] = [.enginePicker]
-            if showsClaudeCustomizationsRow(selectedEngineKind: selectedEngineKind) {
-                controls.append(.claudeCustomizationsToggle)
+            if showsQuickAnswerModelRow(selectedEngineKind: selectedEngineKind) {
+                controls.append(.quickAnswerModel)
+            }
+            if selectedEngineKind != nil {
+                controls.append(.quickAnswerEffort)
             }
             return controls
         case .voice:

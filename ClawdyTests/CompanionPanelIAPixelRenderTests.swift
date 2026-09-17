@@ -115,9 +115,10 @@ private struct NewSectionedSettingsReplica: View {
             switch section {
             case .engine:
                 segment(["Claude Code", "Codex"], selection: selectedEngine)
-                if CompanionSettingsLayout.showsClaudeCustomizationsRow(selectedEngineKind: .claudeCode) {
-                    toggleRow(icon: "gearshape.2", label: "Use my Claude Code setup", isOn: customizationsOn)
+                if CompanionSettingsLayout.showsQuickAnswerModelRow(selectedEngineKind: .claudeCode) {
+                    segment(["Sonnet", "Opus"], selection: "Sonnet")
                 }
+                segment(["Auto", "Low", "Med", "High"], selection: "Auto")
             case .voice:
                 segment(["Apple", "ElevenLabs"], selection: selectedVoice)
             }

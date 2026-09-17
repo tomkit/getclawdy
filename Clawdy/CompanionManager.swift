@@ -640,33 +640,15 @@ final class CompanionManager: ObservableObject {
         prewarmSelectedEngineIfInstalled()
     }
 
-    // MARK: - Claude Code customizations setting
+    // MARK: - Claude Code customizations (always on)
 
-    /// Whether the user's own `claude` customizations (CLAUDE.md, skills, MCP, hooks)
-    /// load on BOTH the warm quick-answer path AND research runs. DEFAULT TRUE — the
-    /// app runs in the user's configured environment out of the box; when false, both
-    /// paths pass `--safe-mode` to isolate the run. Persisted to UserDefaults (same
-    /// default-true idiom as `isClawdyCursorEnabled`).
-    @Published private(set) var useClaudeCustomizations: Bool =
-        UserDefaults.standard.object(forKey: .useClaudeCustomizations) == nil
-            ? true
-            : UserDefaults.standard.bool(forKey: .useClaudeCustomizations)
-
-    /// Persists the "Use my Claude Code setup" setting and makes it take effect on the
-    /// NEXT turn/run. The warm process's args are fixed at spawn, so we REBUILD the warm
-    /// engine exactly like an engine switch (cancel the in-flight turn BEFORE shutting
-    /// the old session down, drop the cached engine, re-prewarm) — the fresh process
-    /// spawns with the new `--safe-mode` arg. Research needs no respawn: a fresh
-    /// research engine is built per run and reads the new value then.
-    func setUseClaudeCustomizations(_ enabled: Bool) {
-        guard enabled != useClaudeCustomizations else { return }
-        useClaudeCustomizations = enabled
-        UserDefaults.standard.set(enabled, forKey: .useClaudeCustomizations)
-
-        cancelInFlightTurnAndShutDownActiveEngineSession()
-        activeCoachEngineCache = nil
-        prewarmSelectedEngineIfInstalled()
-    }
+    /// The user's own `claude` customizations (CLAUDE.md, skills, MCP, hooks) ALWAYS load
+    /// on both the warm quick-answer path and research runs — bringing your own `claude`
+    /// means bringing your own setup. This used to be a panel toggle whose OFF state
+    /// added `--safe-mode`; the toggle is gone (it was noise next to the settings people
+    /// actually tune, model and effort) and the value is now fixed. The `--safe-mode`
+    /// plumbing behind it is kept so the isolated arg vector stays testable.
+    let useClaudeCustomizations: Bool = true
 
     // MARK: - Quick-answer speed settings (Claude only)
 
@@ -2387,6 +2369,16 @@ final class CompanionManager: ObservableObject {
     /// The research session manager, so a test can set up focus / bindings and exercise
     /// the production follow-up-target precedence.
     var researchSessionManagerForTesting: ResearchSessionManager { researchSessionManager }
+
+    /// Flips every permission flag on and marks onboarding complete, so a test can render
+    /// the fully-onboarded menu panel without the real TCC prompts. Test-only.
+    func markFullyOnboardedForTesting() {
+        hasAccessibilityPermission = true
+        hasScreenRecordingPermission = true
+        hasMicrophonePermission = true
+        hasScreenContentPermission = true
+        hasCompletedOnboarding = true
+    }
     /// Exercises the PRODUCTION `resolveFollowUpTargetSessionID()` (real registry + real
     /// `focusedSessionID`), so a test can assert the frontmost results window's session
     /// overrides an unrelated focused session.

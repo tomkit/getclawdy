@@ -28,20 +28,24 @@ struct CompanionSettingsLayoutTests {
 
     // MARK: - Engine section membership (engine-dependent)
 
-    @Test func claudeEngineShowsCustomizationsRowInEngineSection() {
-        #expect(CompanionSettingsLayout.showsClaudeCustomizationsRow(selectedEngineKind: .claudeCode))
+    @Test func claudeEngineShowsModelAndEffortInEngineSection() {
+        #expect(CompanionSettingsLayout.showsQuickAnswerModelRow(selectedEngineKind: .claudeCode))
         #expect(
             CompanionSettingsLayout.controls(in: .engine, selectedEngineKind: .claudeCode)
-                == [.enginePicker, .claudeCustomizationsToggle]
+                == [.enginePicker, .quickAnswerModel, .quickAnswerEffort]
         )
     }
 
-    @Test func codexEngineHidesCustomizationsRow() {
-        #expect(!CompanionSettingsLayout.showsClaudeCustomizationsRow(selectedEngineKind: .codex))
+    @Test func codexEngineShowsOnlyEffort() {
+        #expect(!CompanionSettingsLayout.showsQuickAnswerModelRow(selectedEngineKind: .codex))
         #expect(
             CompanionSettingsLayout.controls(in: .engine, selectedEngineKind: .codex)
-                == [.enginePicker]
+                == [.enginePicker, .quickAnswerEffort]
         )
+    }
+
+    @Test func noEngineShowsOnlyThePicker() {
+        #expect(CompanionSettingsLayout.controls(in: .engine, selectedEngineKind: nil) == [.enginePicker])
     }
 
     // MARK: - Voice membership (engine-independent)
@@ -61,7 +65,7 @@ struct CompanionSettingsLayoutTests {
         let allControls = CompanionSettingsLayout.orderedSections.flatMap {
             CompanionSettingsLayout.controls(in: $0, selectedEngineKind: .claudeCode)
         }
-        #expect(allControls == [.enginePicker, .claudeCustomizationsToggle, .ttsProvider])
+        #expect(allControls == [.enginePicker, .quickAnswerModel, .quickAnswerEffort, .ttsProvider])
         // No control appears twice.
         #expect(Set(allControls).count == allControls.count)
     }

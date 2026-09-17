@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Speed settings.** Pick the model (Sonnet, Opus, or your CLI's default) and effort for quick answers in the menu bar panel. Sonnet is now the default for Claude: about a second faster to the first spoken word than Opus, at half the cost. For Codex the effort setting is the lever (low, the default, is about 2× faster than medium).
 - Per-turn latency log (`log show --predicate 'subsystem == "com.clawdy.Clawdy" AND category == "latency"'`) so slow turns can be attributed to transcription, the model, or speech.
 
+### Changed
+- **Simpler menu bar panel.** One right edge for every control, quieter hierarchy, the hotkey shown as keycaps, History and Quit on one row, no close button (click outside or press Escape). The "Use my Claude Code setup" toggle is gone: your setup always loads.
+
 ### Fixed
 - Opening or closing a research results page no longer forces a cold restart of the warm `claude` process on the next question.
 

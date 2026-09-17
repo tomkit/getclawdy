@@ -429,7 +429,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.clawdy.Clawdy";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.clawdy.Clawdy.debug";
 				PRODUCT_MODULE_NAME = Clawdy;
 				PRODUCT_NAME = Clawdy;
 				REGISTER_APP_GROUPS = YES;

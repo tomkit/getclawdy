@@ -59,6 +59,10 @@ enum QuickAnswerModel: String, CaseIterable, Identifiable, Codable {
     }
 
     static let recommended: QuickAnswerModel = .sonnet
+
+    /// The choices the panel offers. `.harnessDefault` stays a valid stored value (and
+    /// arg behavior) but isn't offered: the two named models are the whole decision.
+    static let offeredCases: [QuickAnswerModel] = [.sonnet, .opus]
 }
 
 /// The effort level for quick answers. For Claude, `.harnessDefault` omits `--effort` so
@@ -85,9 +89,9 @@ enum QuickAnswerEffort: String, CaseIterable, Identifiable, Codable {
 
     var displayName: String {
         switch self {
-        case .harnessDefault: return "Default"
+        case .harnessDefault: return "Auto"
         case .low: return "Low"
-        case .medium: return "Medium"
+        case .medium: return "Med"
         case .high: return "High"
         }
     }
