@@ -387,6 +387,11 @@ final class ClaudePersistentSession: @unchecked Sendable {
         stateQueue.async {
             guard self.activeRequest == nil, !self.hasLiveProcess else { return }
             do {
+                TurnLatencyLog.warmSpawn(
+                    reason: "prewarm",
+                    model: self.quickAnswerSettings.model.rawValue,
+                    effort: self.quickAnswerSettings.effort.rawValue
+                )
                 try self.spawnProcessOnStateQueue(systemPrompt: systemPrompt)
                 // Arm idle teardown only in legacy (non-keep-warm) mode; in keep-warm
                 // mode `armIdleTeardown` is a no-op so the prewarmed process persists.
