@@ -4,7 +4,7 @@
 
 <h1 align="center">Your AI, out of its shell.</h1>
 
-<p align="center"><strong>Clawdy is an AI cursor buddy for Mac. It sees your screen, talks back, and points at exactly what it means. In any app.</strong></p>
+<p align="center">Clawdy is a voice assistant for your Mac that can see your screen and point at things.</p>
 
 <p align="center">
   <a href="https://getclawdy.com">getclawdy.com</a> ·
@@ -13,15 +13,15 @@
 </p>
 
 <p align="center">
-  <img src="assets/clawdy-hero.png" width="860" alt="Clawdy, a small red lobster, bursting out through a jagged hole in a shattered terminal window, next to a spreadsheet with a broken cell." />
+  <img src="assets/clawdy-hero.png" width="860" alt="Clawdy, a small red lobster, climbing out of a broken terminal window next to a spreadsheet." />
 </p>
 
-Clawdy runs on your own local Claude Code or Codex using your subscription tokens.
+Clawdy runs on your own local Claude Code or Codex, using your subscription tokens. No account, nothing extra to pay for, and your voice stays on your Mac.
 
-- **It sees what you see.** Every window, every app, every monitor.
-- **Just say it.** Hold **Control + Option** and talk. No typing, no prompts.
-- **It talks back.** Out loud, in plain words, while you keep working.
-- **It points.** The claw cursor points things out on your screen.
+- It sees what you see. Every window, every monitor.
+- Just say it. Hold Control + Option and talk. No typing.
+- It talks back, out loud.
+- It points. The claw cursor lands on the exact spot.
 
 <p align="center">
   <a href="https://github.com/tomkit/getclawdy/releases/latest/download/Clawdy.dmg">
@@ -37,63 +37,62 @@ Clawdy runs on your own local Claude Code or Codex using your subscription token
 - "What do they actually want from me in this email?"
 - "Find me three laptops under $900 and put it on one page."
 
-Clawdy answers out loud and the claw points things out. For the bigger tasks, it leverages all the work you've put into your local harness and can leverage all the subagents, prompts, and plugins you've set up.
+Clawdy answers out loud and the claw points things out. Bigger tasks get handed to your local harness, so everything you've set up there (subagents, prompts, plugins, skills) comes along.
 
 ## Example: planning a road trip
 
-**Point at your screen and talk.** Clawdy answers out loud and the claw flies to what it means.
+Point at your screen and talk. Clawdy answers out loud and the claw flies to what it means.
 
 ![Clawdy planning a coastal route in Aomori](assets/demo-route.gif)
 
 ## Get started
 
-1. **[Download Clawdy.dmg](https://github.com/tomkit/getclawdy/releases/latest/download/Clawdy.dmg)**, open it, and drag Clawdy into **Applications**.
-2. Launch Clawdy and allow **Microphone**, **Screen Recording**, and **Accessibility** when asked (then relaunch).
-3. Make sure one of these is installed and signed in. If you already use it, you're done:
-   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code): `npm install -g @anthropic-ai/claude-code`, then run `claude` once to sign in.
-   - [Codex](https://github.com/openai/codex): `npm install -g @openai/codex`, then `codex login`.
-4. Click the claw in your menu bar, hold **Control + Option**, and talk.
+1. [Download Clawdy.dmg](https://github.com/tomkit/getclawdy/releases/latest/download/Clawdy.dmg), open it, drag Clawdy into Applications.
+2. Launch it. Allow Microphone, Screen Recording, and Accessibility when asked, then relaunch.
+3. Have Claude Code or Codex installed and signed in. If you already use one, skip this.
+   - Claude Code: `npm install -g @anthropic-ai/claude-code`, then run `claude` once to sign in.
+   - Codex: `npm install -g @openai/codex`, then `codex login`.
+4. Hold Control + Option and talk.
 
-Needs macOS 14.2 (Sonoma) or later. Works on Intel and Apple Silicon.
+macOS 14.2 or later, Intel or Apple Silicon.
 
-Optional: add an [ElevenLabs](https://elevenlabs.io) key in the menu-bar panel for a nicer voice. Without it, Clawdy uses the voice built into macOS.
+If you want a nicer voice, put an [ElevenLabs](https://elevenlabs.io) key in the menu bar panel. Otherwise it uses the macOS voice.
 
 ## Use your own CLI harness
 
-- **Your CLI, your tokens.** Clawdy shells out to the `claude` or `codex` binary on your machine. Every answer is billed to whatever subscription that CLI is signed into. No API keys, no proxy, no backend.
-- **Your whole setup comes along.** Clawdy runs your CLI as-is, so the CLAUDE.md, skills, plugins, hooks, and MCP servers you've set up all load, same as in your terminal.
-- **Pick it up in the shell whenever you want.** Every Clawdy conversation is a real CLI session. Resume one with `claude --resume <id>` or `codex resume <id>`, or hit "Resume in Terminal" in the History window.
-- **It runs your skills.** Your existing Claude Code skills work by voice, and you can write Clawdy-specific ones. Details below.
+Clawdy shells out to the `claude` or `codex` binary on your machine. Whatever you ask gets billed to the subscription that CLI is signed into. No API keys, no proxy, no server of ours in the middle.
+
+Because it's your real CLI, your setup comes with it: CLAUDE.md, skills, plugins, hooks, MCP servers. And every conversation is a real session. Pick one up in the terminal with `claude --resume <id>` (or `codex resume`), or click "Resume in Terminal" in the History window.
 
 ## Skills and routing
 
-Clawdy can give quick spoken answers to most questions. For more complex questions, like "research this and build me a page" or "plan me three days in Kyoto", Clawdy can use your existing skills or Clawdy-specific skills which will trigger a separate agent that goes off, does the work, and comes back with a result.
+Quick questions get a quick spoken answer. Bigger ones, like "research this and build me a page" or "plan me three days in Kyoto," get handed to a skill: your existing Claude Code skills, or Clawdy-specific ones. A separate agent goes off, does the work, and comes back with a page or a spoken result.
 
-**How routing works.** Every question goes to Clawdy's voice agent first. It reads the list of skills it knows about and makes a call:
+How Clawdy decides: every question goes to the voice agent first. If it can answer from your screen or from what it knows, it answers. If the ask needs the web, several steps, or a finished page, or it matches one of the skills it has, it replies with one line like
 
-- Quick and answerable right now (from your screen or general knowledge)? It just answers.
-- Needs the web, several steps, or a built artifact, or clearly matches a skill's description? It replies with a single line instead of talking, like `[RESEARCH] compare the three best standing desks under $1000 and build a page`, and Clawdy starts that skill in its own process.
+```
+[RESEARCH] compare the three best standing desks under $1000 and build a page
+```
 
-**Two kinds of skills.**
+and Clawdy starts that skill in its own process. "Where do I click?" questions are never routed; those always get a spoken answer and the claw.
 
-1. *Your Claude Code skills.* Anything in `~/.claude/skills` (or `~/.codex/skills` if you use Codex) is already available by voice. Nothing to set up. Clawdy runs the skill in a dedicated `claude` session and reads the result back to you.
-2. *Clawdy skills.* Same `SKILL.md` format, but written for Clawdy's interface: voice in, and a page on your screen or a spoken answer out. They live in `~/.clawdy/skills`.
+**Your Claude Code skills already work.** Anything in `~/.claude/skills` (or `~/.codex/skills`) can be asked for by voice. Clawdy runs it in a `claude` session and reads the result back. Nothing to set up.
 
-**Bundled Clawdy skills.**
+**Clawdy skills** live in `~/.clawdy/skills`. Same `SKILL.md` format, written for voice in and a page or spoken answer out. Two come installed:
 
-| Skill | You say | What happens |
+| Skill | Say | You get |
 |---|---|---|
-| `research` | "Find the best noise-cancelling headphones and build me a page." | Researches the web, asks a clarifying question if it needs one, builds a self-contained page, and opens it. Keep talking to it to change the page. |
-| `trip-planner` | "Plan me three days in Kyoto." | Builds a day-by-day itinerary page with neighborhoods and places to eat.
+| `research` | "Find the best noise-cancelling headphones and build me a page." | Web research, one clarifying question if needed, and a page. Keep talking to change it. |
+| `trip-planner` | "Plan me three days in Kyoto." | A day-by-day itinerary page with neighborhoods and places to eat. |
 
-Edit `research/SKILL.md` to change how research behaves. Changes apply on your next question; no relaunch.
+Edit `research/SKILL.md` if you want research to behave differently. Changes take effect on your next question.
 
-**Adding a new one.** Make a folder in `~/.clawdy/skills` with a `SKILL.md`. The description tells the router when to use it; the body tells the agent what to do.
+**Adding one.** New folder in `~/.clawdy/skills`, one `SKILL.md`. The description tells the router when to use it. The body tells the agent what to do.
 
 ```markdown
 ---
 name: recipe-finder
-description: finds a recipe for what the user has on hand and builds a page with it. use for "what can i make with X", "find me a recipe for Y". example — user says "what can i make with eggs and spinach": [RECIPE_FINDER] find a recipe using eggs and spinach and build a page.
+description: finds a recipe for what the user has on hand and builds a page with it. use for "what can i make with X". example, user says "what can i make with eggs and spinach": [RECIPE_FINDER] find a recipe using eggs and spinach and build a page.
 allowed-tools: WebSearch, WebFetch, Write
 clawdy-deliverable: html
 ---
@@ -101,13 +100,13 @@ clawdy-deliverable: html
 Find a good recipe for: {{task}}. Search the web, pick one, and write ONE self-contained HTML page to {{outputPath}} with ingredients, steps, and how long it takes.
 ```
 
-Then say "what can I make with eggs and spinach." That's it.
+Now say "what can I make with eggs and spinach."
 
-The marker in brackets comes from the name (`recipe-finder` becomes `[RECIPE_FINDER]`). Set `clawdy-deliverable: none` for a skill that should just speak its answer instead of opening a page. For full control over each phase (planning, executing, follow-ups), look at how `research/SKILL.md` is split into sections. `~/.clawdy/skills/README.md` has the complete list of options.
+The bracket tag comes from the name (`recipe-finder` → `[RECIPE_FINDER]`). `clawdy-deliverable: none` makes a skill speak its answer instead of opening a page. `research/SKILL.md` shows how to control each phase separately, and `~/.clawdy/skills/README.md` lists every option.
 
 ## Build from source
 
-You'll need **macOS 14.2+** and **Xcode 16+** (from the Mac App Store or [developer.apple.com](https://developer.apple.com/xcode/)). Make sure the command-line tools point at it: `sudo xcode-select -s /Applications/Xcode.app`.
+You need macOS 14.2+ and Xcode 16+. Point the command line tools at it: `sudo xcode-select -s /Applications/Xcode.app`.
 
 ```bash
 git clone https://github.com/tomkit/getclawdy.git
@@ -115,22 +114,17 @@ cd getclawdy
 open Clawdy.xcodeproj
 ```
 
-In Xcode:
+In Xcode, pick the Clawdy scheme and the My Mac destination, set your team under Signing & Capabilities (a personal Apple ID is fine), and press Cmd + R. The app shows up in the menu bar; there's no dock icon or window. First launch asks for Microphone, Speech Recognition, Accessibility, and Screen Recording. Grant them and relaunch. They're tied to the code signature, so a build signed differently will ask again.
 
-1. Select the **Clawdy** scheme and the **My Mac** destination.
-2. Under the **Clawdy** target → **Signing & Capabilities**, pick your **Team**. Automatic signing with a personal Apple ID is fine for running locally.
-3. Press **Cmd + R**. The app appears in your menu bar (there's no dock icon and no main window).
-4. On first launch, grant **Microphone**, **Speech Recognition**, **Accessibility**, and **Screen Recording** when macOS asks, then quit and relaunch. These are tied to the signed binary, so you'll be asked again if the signature changes.
-
-To run the unit tests, use **Cmd + U**, or from the terminal:
+Tests: Cmd + U, or
 
 ```bash
 xcodebuild test -project Clawdy.xcodeproj -scheme Clawdy -destination 'platform=macOS' -only-testing:ClawdyTests CODE_SIGNING_ALLOWED=NO
 ```
 
-Prefer building from Xcode for day-to-day work. Building with `xcodebuild` from the terminal can invalidate the macOS privacy permissions above, so the app may ask for them again.
+Build from Xcode for day-to-day work. Terminal `xcodebuild` runs can reset the permissions above.
 
-**Verifying a release download.** Each release ships a `SHA256SUMS` file. The DMG is a universal binary, signed with a Developer ID and notarized by Apple:
+To check a downloaded release: each one ships a `SHA256SUMS`. The DMG is signed with a Developer ID and notarized by Apple.
 
 ```bash
 shasum -a 256 -c SHA256SUMS
@@ -138,4 +132,4 @@ shasum -a 256 -c SHA256SUMS
 
 ## Credits and license
 
-Clawdy is an open-source fork of [heyclicky](https://heyclicky.com), rebuilt to run on the coding CLI you already have instead of a hosted backend. Clawdy's own source is under the **MIT License** (`LICENSE`); the upstream MIT notice is retained in `NOTICE`. Bundled third-party components are listed in `THIRD-PARTY-LICENSES.md`.
+Clawdy is a fork of [heyclicky](https://heyclicky.com), rebuilt to run on the coding CLI you already have instead of a hosted backend. Clawdy's code is MIT (`LICENSE`); the upstream notice is in `NOTICE`. Bundled third-party components are listed in `THIRD-PARTY-LICENSES.md`.
