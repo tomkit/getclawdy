@@ -1653,6 +1653,13 @@ final class CompanionManager: ObservableObject {
     /// question STILL gets a quick spoken answer with a [POINT:...] tag, never a
     /// follow-up. Trivially-quick standalone questions are still answered inline,
     /// and a brand-new go-gather-and-build ask still routes to a skill marker.
+    /// Rides in the USER message on a turn where the user drew on their screen: the red
+    /// strokes in the cursor screen's screenshot are the user's own annotation, and words
+    /// like "this", "here", "the one I circled" refer to what they marked.
+    static let companionAnnotationAddendum = """
+    the user drew on their screen while asking this. the red hand-drawn strokes in the screenshot labeled "primary focus" are their annotation — not part of the app — and "this", "here", "the one i marked" refer to exactly what the strokes trace or circle. answer about the marked thing, and if you point, point at the marked thing itself (for a traced road or path, a spot ON the stroke), not at something similar elsewhere on screen.
+    """
+
     private static let companionFocusedFollowUpAddendum = """
     (context for this turn only — focused research page, continue-thread routing:)
     right now the user has an open research page you generated for them in an earlier turn — they're looking at it. so ONE more routing option is live on THIS turn: continuing that page's own thread.
@@ -1862,9 +1869,13 @@ final class CompanionManager: ObservableObject {
         // toggling the addendum in and out as results windows came and went was
         // costing a cold spawn on the next turn each time. The user text is
         // per-turn by nature, and the router honors the instruction just the same.
-        let effectiveUserPrompt = hasFollowUpTarget
-            ? Self.companionFocusedFollowUpAddendum + "\n\n" + transcript
-            : transcript
+        var userPromptAddenda: [String] = []
+        if hasFollowUpTarget { userPromptAddenda.append(Self.companionFocusedFollowUpAddendum) }
+        // The user drew on the screen while speaking: the red strokes are burned into the
+        // cursor screen's screenshot below, and the model has to be TOLD they're the
+        // user's marks — otherwise "this road" is a guess over the whole map.
+        if !pendingAnnotationStrokes.isEmpty { userPromptAddenda.append(Self.companionAnnotationAddendum) }
+        let effectiveUserPrompt = (userPromptAddenda + [transcript]).joined(separator: "\n\n")
 
         currentResponseTask = Task {
             // Stay in processing (spinner) state — no streaming text displayed

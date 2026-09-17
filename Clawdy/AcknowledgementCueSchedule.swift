@@ -11,13 +11,13 @@
 //               way a listener nods after you finish, not the instant you stop; the
 //               pre-rendered clip makes the timing exact. Real WORDS only: the
 //               interjections ("mm-hm", "hmm") come out garbled from the model.
-//    t ≈ 3s     a short filler ("checking now.")
-//    t ≈ 8s     a progress line ("still checking.")
-//    t ≈ 15s    a longer-wait line ("this one's taking a bit.")
+//    t ≈ 6s     a short filler ("checking now.")
+//    t ≈ 12s    a progress line ("still checking.")
+//    t ≈ 20s    a longer-wait line ("this is taking a little longer than usual.")
 //
-//  The later fillers don't start before ~3s: with Sonnet + low effort an easy answer
-//  reaches first audio at ~2–2.5s, and a filler that starts at 1s and runs ~1s would
-//  collide with it. A filler fires only while the reply is still silent (and is dropped
+//  The first filler waits until ~6s: an ordinary answer's first text lands at ~2–4s,
+//  and the 1s acknowledgement already covers that stretch — a second line at 3s made
+//  every quick question sound like two acknowledgements. A filler fires only while the reply is still silent (and is dropped
 //  the moment the reply's first TEXT arrives, since audio is then <1s away); the turn
 //  ending for any reason cancels the rest.
 //
@@ -37,9 +37,9 @@ enum AcknowledgementCueSchedule {
     static let `default`: [Step] = [
         // Users are almost always asking something, so the nod is "let me check", not "okay".
         Step(delaySeconds: 1.0, phrases: ["let me check.", "let me take a look.", "let me see.", "one moment."]),
-        Step(delaySeconds: 3.0, phrases: ["checking now.", "looking into it.", "just a second."]),
-        Step(delaySeconds: 8.0, phrases: ["still checking.", "still looking, bear with me.", "almost there."]),
-        Step(delaySeconds: 15.0, phrases: ["this is taking a little longer than usual, hang tight.", "still working on it."])
+        Step(delaySeconds: 6.0, phrases: ["checking now.", "looking into it.", "just a second."]),
+        Step(delaySeconds: 12.0, phrases: ["still checking.", "still looking, bear with me.", "almost there."]),
+        Step(delaySeconds: 20.0, phrases: ["this is taking a little longer than usual, hang tight.", "still working on it."])
     ]
 
     /// Every distinct phrase the schedule can speak (what the renderer pre-renders).
