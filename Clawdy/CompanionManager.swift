@@ -2207,11 +2207,13 @@ final class CompanionManager: ObservableObject {
                 currentSentenceBuffer = nil
 
                 // Handle element pointing if Claude returned any targets.
-                // Switch to idle BEFORE starting the sequence so the triangle
-                // becomes visible and can fly to the first target. Without this, the
-                // spinner hides the triangle and the flight animation is invisible.
+                // Leave the spinner state BEFORE starting the sequence so the claw
+                // becomes visible and can fly to the first target — but stay
+                // `.responding` while the voice is still speaking (a long reply keeps
+                // playing well after its text arrived), so the panel's Stop stays
+                // available and announcements keep queuing behind the reply.
                 if !pointingTargets.isEmpty {
-                    voiceState = .idle
+                    voiceState = (currentResponseSpeaker?.isSpeaking ?? false) ? .responding : .idle
                     for target in pointingTargets {
                         ClawdyAnalytics.trackElementPointed(elementLabel: target.elementLabel)
                     }
@@ -2269,6 +2271,14 @@ final class CompanionManager: ObservableObject {
             cancelThinkingCue()
 
             if !Task.isCancelled {
+                // The TEXT is done; the voice may not be. Wait for playback to finish (a
+                // long answer keeps speaking for many seconds) before settling to idle, so
+                // Stop is offered for as long as there is something to stop.
+                if let responseSpeaker = currentResponseSpeaker, responseSpeaker.isSpeaking {
+                    voiceState = .responding
+                    await responseSpeaker.awaitAllPlaybackFinished()
+                    guard currentResponseSpeaker === responseSpeaker, !Task.isCancelled else { return }
+                }
                 voiceState = .idle
                 scheduleTransientHideIfNeeded()
             }

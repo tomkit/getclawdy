@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The macOS system voice. The built-in Kokoro voice replaces it entirely (ElevenLabs remains as the bring-your-own-key option).
 
 ### Fixed
+- Stop stays available for the whole spoken answer. The panel dropped it (and the companion went "idle") the moment the reply's text was complete, even though a long answer keeps speaking for many seconds after that.
 - The instant "let me check" was being cut off (and the "let me look" fillers and a queued "your page is ready" were being cancelled) by the request's own teardown right after key release. Cues now survive the request start; only a re-press or Stop cancels them. A research hand-off says one thing, not "okay" and then "on it".
 - Opening or closing a research results page no longer forces a cold restart of the warm `claude` process on the next question.
 
