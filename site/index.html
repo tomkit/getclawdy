@@ -104,6 +104,7 @@
   .moments-intro{ text-align:center; padding: 0 clamp(20px,6vw,64px) 24px; max-width: 720px; margin: 0 auto; }
   .moments-intro h2{ font-size: clamp(28px,3.6vw,44px); letter-spacing:-0.025em; line-height:1.05; margin:0 0 12px; text-wrap:balance; }
   .moments-intro p{ color:var(--muted); font-size:17px; margin:0; }
+  .moments-intro kbd{ font-family:inherit; font-size:15px; font-weight:600; color:var(--ink); background:var(--card); border:1px solid var(--line); border-bottom-width:2px; border-radius:6px; padding:2px 8px; }
   .moment{ display:grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(24px,4vw,64px); align-items:center; max-width:1200px; margin:0 auto; padding: 56px clamp(20px,6vw,64px); }
   .moment:nth-child(even){ grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
   .moment:nth-child(even) .moment-copy{ order: 2; }
@@ -257,7 +258,7 @@
     <section class="moments">
       <div class="moments-intro">
         <h2>Hold a key. Say the thing you'd say anyway.</h2>
-        <p>You talk. Clawdy looks at your screen, talks back, and the claw goes to the exact spot.</p>
+        <p>Hold <kbd>Control</kbd> + <kbd>Option</kbd> and talk. Clawdy looks at your screen, talks back, and the claw goes to the exact spot.</p>
       </div>
 
       <article class="moment">
