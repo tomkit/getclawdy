@@ -4,7 +4,8 @@
 //
 //  Per-turn latency instrumentation for the push-to-talk → answer pipeline, so the
 //  delay a user FEELS can be attributed to a stage instead of guessed at. Every mark is
-//  an `os.Logger` line (subsystem `com.clawdy.Clawdy`, category `latency`) with the
+//  an `os.Logger` line at NOTICE level (info is not persisted, so `log show` would miss
+//  it) in subsystem `com.clawdy.Clawdy`, category `latency`, with the
 //  seconds since push-to-talk RELEASE, so a Finder-launched build is readable with:
 //
 //      log show --predicate 'subsystem == "com.clawdy.Clawdy" AND category == "latency"' --last 10m --style compact
@@ -33,7 +34,7 @@ final class TurnLatencyLog {
         turnStart = Date()
         hasLoggedFirstText = false
         hasLoggedFirstAudio = false
-        Self.logger.info("ptt-released t=0.00s")
+        Self.logger.notice("ptt-released t=0.00s")
     }
 
     func transcriptReady(viaFallback: Bool, characterCount: Int) {
@@ -66,12 +67,12 @@ final class TurnLatencyLog {
 
     /// Not tied to a turn's clock: the warm process was (re)spawned and why.
     nonisolated static func warmSpawn(reason: String, model: String, effort: String) {
-        logger.info("warm-spawn reason=\(reason, privacy: .public) model=\(model, privacy: .public) effort=\(effort, privacy: .public)")
+        logger.notice("warm-spawn reason=\(reason, privacy: .public) model=\(model, privacy: .public) effort=\(effort, privacy: .public)")
     }
 
     private func mark(_ stage: String, detail: String = "") {
         let elapsed = turnStart.map { Date().timeIntervalSince($0) } ?? -1
         let elapsedText = String(format: "%.2f", elapsed)
-        Self.logger.info("\(stage, privacy: .public) t=\(elapsedText, privacy: .public)s \(detail, privacy: .public)")
+        Self.logger.notice("\(stage, privacy: .public) t=\(elapsedText, privacy: .public)s \(detail, privacy: .public)")
     }
 }
