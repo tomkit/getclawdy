@@ -66,30 +66,20 @@ Clawdy shells out to the `claude` or `codex` binary on your machine. Whatever yo
 
 Because it's your real CLI, your setup comes with it: CLAUDE.md, skills, plugins, hooks, MCP servers. And every conversation is a real session. Pick one up in the terminal with `claude --resume <id>` (or `codex resume`), or click "Resume in Terminal" in the History window.
 
-## Skills and routing
+## Routing
 
-Quick questions get a quick spoken answer. Bigger ones, like "research this and build me a page" or "plan me three days in Kyoto," get handed to a skill: your existing Claude Code skills, or Clawdy-specific ones. A separate agent goes off, does the work, and comes back with a page or a spoken result.
+Clawdy is a lead agent. It can answer simple questions on its own and will respond quickly. For bigger questions, it will route to a subagent or trigger a plugin (mcp, skill, tool) to help it answer the question.
 
-How Clawdy decides: every question goes to the voice agent first. If it can answer from your screen or from what it knows, it answers. If the ask needs the web, several steps, or a finished page, or it matches one of the skills it has, it replies with one line like
+## Skills
 
-```
-[RESEARCH] compare the three best standing desks under $1000 and build a page
-```
-
-and Clawdy starts that skill in its own process. "Where do I click?" questions are never routed; those always get a spoken answer and the claw.
-
-**Your Claude Code skills already work.** Anything in `~/.claude/skills` (or `~/.codex/skills`) can be asked for by voice. Clawdy runs it in a `claude` session and reads the result back. Nothing to set up.
-
-**Clawdy skills** live in `~/.clawdy/skills`. Same `SKILL.md` format, written for voice in and a page or spoken answer out. Two come installed:
+**Clawdy skills** live in `~/.clawdy/skills`. Same `SKILL.md` format, but should be more geared for voice input and spoken output. Two come installed:
 
 | Skill | Say | You get |
 |---|---|---|
 | `research` | "Find the best noise-cancelling headphones and build me a page." | Web research, one clarifying question if needed, and a page. Keep talking to change it. |
 | `trip-planner` | "Plan me three days in Kyoto." | A day-by-day itinerary page with neighborhoods and places to eat. |
 
-Edit `research/SKILL.md` if you want research to behave differently. Changes take effect on your next question.
-
-**Adding one.** New folder in `~/.clawdy/skills`, one `SKILL.md`. The description tells the router when to use it. The body tells the agent what to do.
+**Adding a new skill.** Create a new folder in `~/.clawdy/skills` and one `SKILL.md`. 
 
 ```markdown
 ---
@@ -103,8 +93,6 @@ Find a good recipe for: {{task}}. Search the web, pick one, and write ONE self-c
 ```
 
 Now say "what can I make with eggs and spinach."
-
-The bracket tag comes from the name (`recipe-finder` → `[RECIPE_FINDER]`). `clawdy-deliverable: none` makes a skill speak its answer instead of opening a page. `research/SKILL.md` shows how to control each phase separately, and `~/.clawdy/skills/README.md` lists every option.
 
 ## Build from source
 
