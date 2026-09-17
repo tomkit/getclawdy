@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Speed settings.** Pick the model (Sonnet, Opus, or your CLI's default) and effort for quick answers in the menu bar panel. Sonnet is now the default: about a second faster to the first spoken word than Opus, at half the cost.
+- **Speed settings.** Pick the model (Sonnet, Opus, or your CLI's default) and effort for quick answers in the menu bar panel. Sonnet is now the default for Claude: about a second faster to the first spoken word than Opus, at half the cost. For Codex the effort setting is the lever (low, the default, is about 2× faster than medium).
 - Per-turn latency log (`log show --predicate 'subsystem == "com.clawdy.Clawdy" AND category == "latency"'`) so slow turns can be attributed to transcription, the model, or speech.
 
 ### Fixed

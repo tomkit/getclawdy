@@ -314,6 +314,18 @@ struct CoachEngineTests {
         #expect(!inherited.contains("--model") && !inherited.contains("--effort"))
     }
 
+    /// Codex's one latency lever is the reasoning-effort override: low by default,
+    /// an explicit level when chosen, and omitted (config.toml applies) for "Default"
+    /// only when the caller asks for the harness default explicitly.
+    @Test func codexArgumentsCarryTheQuickAnswerEffort() {
+        let low = CodexEngine.makeArguments(workingDirectoryPath: "/w", imageFilePaths: [])
+        #expect(low.contains("model_reasoning_effort=low"))
+        let high = CodexEngine.makeArguments(workingDirectoryPath: "/w", imageFilePaths: [], quickAnswerEffort: .high)
+        #expect(high.contains("model_reasoning_effort=high") && !high.contains("model_reasoning_effort=low"))
+        let inherited = CodexEngine.makeArguments(workingDirectoryPath: "/w", imageFilePaths: [], quickAnswerEffort: .harnessDefault)
+        #expect(!inherited.contains { $0.hasPrefix("model_reasoning_effort=") })
+    }
+
     @Test func claudeCodeArgumentsUsePrintModeStreamJSONInputAndNoTools() {
         // Default setting: customizations load (safe-mode OMITTED).
         let arguments = ClaudeCodeEngine.makeArguments(systemPrompt: "you are clawdy", useClaudeCustomizations: true)

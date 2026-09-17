@@ -71,7 +71,13 @@ final class CoachEngineRegistry {
                 quickAnswerSettings: quickAnswerSettings
             )
         case .codex:
-            return CodexEngine(binaryPath: detected.binaryPath)
+            // Codex has no warm process and its model choice barely matters; the
+            // effort override is the one latency lever, so the same setting drives it.
+            return CodexEngine(
+                binaryPath: detected.binaryPath,
+                quickAnswerEffort: quickAnswerSettings.effort == .harnessDefault
+                    ? .low : quickAnswerSettings.effort
+            )
         }
     }
 

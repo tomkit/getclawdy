@@ -61,8 +61,10 @@ enum QuickAnswerModel: String, CaseIterable, Identifiable, Codable {
     static let recommended: QuickAnswerModel = .sonnet
 }
 
-/// The `--effort` level for the warm quick-answer process. `.harnessDefault` omits the
-/// flag so the user's own `claude` setting applies.
+/// The effort level for quick answers. For Claude, `.harnessDefault` omits `--effort` so
+/// the user's own `claude` setting applies (effort showed no measurable effect there).
+/// For Codex, `.harnessDefault` means Clawdy's `low` override (medium was 2× slower);
+/// an explicit level is passed as `-c model_reasoning_effort=<level>`.
 enum QuickAnswerEffort: String, CaseIterable, Identifiable, Codable {
     case harnessDefault
     case low

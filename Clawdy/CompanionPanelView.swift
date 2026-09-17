@@ -190,6 +190,8 @@ struct CompanionPanelView: View {
                     selectedEngineKind: companionManager.selectedEngineKind
                 ) {
                     claudeCustomizationsToggleRow
+                }
+                if companionManager.selectedEngineKind != nil {
                     quickAnswerSpeedRows
                 }
             case .voice:
@@ -800,6 +802,9 @@ struct CompanionPanelView: View {
     /// the warm process, so the next question uses it.
     private var quickAnswerSpeedRows: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Codex: no warm process and the model barely moves latency, so only the
+            // effort row (its one real lever) is offered.
+            if companionManager.selectedEngineKind == .claudeCode {
             speedRow(
                 label: "Model",
                 icon: "hare",
@@ -813,10 +818,13 @@ struct CompanionPanelView: View {
                     companionManager.setQuickAnswerSettings(settings)
                 }
             )
+            }
             speedRow(
                 label: "Effort",
                 icon: "brain",
-                hint: "how hard it thinks before answering",
+                hint: companionManager.selectedEngineKind == .codex
+                    ? "default is low; medium is about 2× slower"
+                    : "how hard it thinks before answering",
                 options: QuickAnswerEffort.allCases,
                 title: { $0.displayName },
                 isSelected: { companionManager.quickAnswerSettings.effort == $0 },

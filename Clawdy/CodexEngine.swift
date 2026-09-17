@@ -62,28 +62,50 @@ final class CodexEngine: CoachEngine {
 
     private let binaryPath: String
     private let homeDirectoryPath: String
+    /// The user's quick-answer effort choice. `.low` (the recommended default for
+    /// Codex) or any explicit level becomes `-c model_reasoning_effort=<level>`;
+    /// `.harnessDefault` omits the override so `~/.codex/config.toml` applies. Measured
+    /// 2026-09-17 (codex 0.153.4, gpt-6-astra, one-shot with a screenshot): medium ≈ 9s
+    /// to the reply, low ≈ 4s. The model choice, by contrast, barely moves it.
+    private let quickAnswerEffort: QuickAnswerEffort
 
-    init(binaryPath: String, homeDirectoryPath: String = NSHomeDirectory()) {
+    init(
+        binaryPath: String,
+        homeDirectoryPath: String = NSHomeDirectory(),
+        quickAnswerEffort: QuickAnswerEffort = .low
+    ) {
         self.binaryPath = binaryPath
         self.homeDirectoryPath = homeDirectoryPath
+        self.quickAnswerEffort = quickAnswerEffort
+    }
+
+    /// The `-c model_reasoning_effort=…` override for an effort choice, or nil to
+    /// inherit the user's Codex config.
+    static func reasoningEffortOverride(for effort: QuickAnswerEffort) -> String? {
+        guard let level = effort.claudeEffortArgument else { return nil }
+        return "model_reasoning_effort=\(level)"
     }
 
     /// Builds the `codex` argument vector. Pure and static so it can be
     /// unit-tested without launching anything.
     static func makeArguments(
         workingDirectoryPath: String,
-        imageFilePaths: [String]
+        imageFilePaths: [String],
+        quickAnswerEffort: QuickAnswerEffort = .low
     ) -> [String] {
         var arguments = [
             "exec",
             "--skip-git-repo-check",
             "-s", "read-only",
             "-C", workingDirectoryPath,
-            "--json",
-            // Lower the reasoning effort for this quick-answer coaching path only,
-            // trading reasoning depth for latency (see the file header).
-            "-c", coachingReasoningEffortOverride
+            "--json"
         ]
+        // Lower (or otherwise set) the reasoning effort for this quick-answer path
+        // only, trading reasoning depth for latency (see the file header). "Default"
+        // leaves the user's config.toml in charge.
+        if let effortOverride = reasoningEffortOverride(for: quickAnswerEffort) {
+            arguments.append(contentsOf: ["-c", effortOverride])
+        }
         for imageFilePath in imageFilePaths {
             arguments.append("-i")
             arguments.append(imageFilePath)
@@ -116,7 +138,8 @@ final class CodexEngine: CoachEngine {
 
         let arguments = Self.makeArguments(
             workingDirectoryPath: temporaryDirectory.path,
-            imageFilePaths: screenshotFiles.map { $0.absolutePath }
+            imageFilePaths: screenshotFiles.map { $0.absolutePath },
+            quickAnswerEffort: quickAnswerEffort
         )
 
         let environment = CLIProcessRunner.makeChildEnvironment(homeDirectoryPath: homeDirectoryPath)
