@@ -31,11 +31,14 @@ enum AcknowledgementCueSchedule {
         let phrases: [String]
     }
 
+    // Phrasing follows the register of ChatGPT's voice mode: short, warm, conversational —
+    // an assistant who's listening, not a status line. Real words only (interjections
+    // like "mm-hm"/"hmm" come out garbled from the model).
     static let `default`: [Step] = [
-        Step(delaySeconds: 1.0, phrases: ["okay.", "got it.", "sure."]),
-        Step(delaySeconds: 3.0, phrases: ["let me look.", "let me check.", "one sec."]),
-        Step(delaySeconds: 8.0, phrases: ["still checking.", "still on it.", "almost there."]),
-        Step(delaySeconds: 15.0, phrases: ["this one's taking a bit.", "still working on it, hang on."])
+        Step(delaySeconds: 1.0, phrases: ["okay.", "got it.", "sure.", "alright."]),
+        Step(delaySeconds: 3.0, phrases: ["let me check.", "let me take a look.", "one moment."]),
+        Step(delaySeconds: 8.0, phrases: ["still checking.", "still looking, bear with me.", "almost there."]),
+        Step(delaySeconds: 15.0, phrases: ["this is taking a little longer than usual, hang tight.", "still working on it."])
     ]
 
     /// Every distinct phrase the schedule can speak (what the renderer pre-renders).

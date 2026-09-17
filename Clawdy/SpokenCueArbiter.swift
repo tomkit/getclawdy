@@ -210,9 +210,9 @@ final class SpokenCueArbiter {
 enum ResearchSpokenCue {
     static func phrase(for cue: ResearchAudioCue) -> String {
         switch cue {
-        case .acknowledge: return "on it. i'll put a page together."
+        case .acknowledge: return "sure. i'll put a page together for you."
         case .done: return "your page is ready."
-        case .error: return "that one didn't work out."
+        case .error: return "sorry, that one didn't work out."
         }
     }
     static var allPhrases: [String] { [ResearchAudioCue.acknowledge, .done, .error].map(phrase(for:)) }
