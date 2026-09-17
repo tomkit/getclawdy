@@ -63,6 +63,10 @@ final class ClaudeCodeEngine: CoachEngine {
     /// the conversation server-side.
     private let persistentSession: ClaudePersistentSession
 
+    func setThinkingStartedHandler(_ handler: @escaping @MainActor @Sendable () -> Void) {
+        persistentSession.onThinkingStarted = handler
+    }
+
     init(
         binaryPath: String,
         homeDirectoryPath: String = NSHomeDirectory(),

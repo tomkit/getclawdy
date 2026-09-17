@@ -751,3 +751,14 @@ struct CoachEngineRescanAvailabilityTests {
         #expect(accumulator.fullText == "", "no running text is retained in this mode")
     }
 }
+
+struct ThinkingSignalParsingTests {
+    @Test func thinkingBlockStartParsesAsThinkingStartedAndTextBlockDoesNot() {
+        let thinking = #"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}}"#
+        #expect(ClaudeStreamEvent.parse(line: thinking) == .thinkingStarted)
+        let text = #"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}}"#
+        #expect(ClaudeStreamEvent.parse(line: text) == .other)
+        let delta = #"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"hmm"}}}"#
+        #expect(ClaudeStreamEvent.parse(line: delta) == .other, "thought content is never surfaced")
+    }
+}

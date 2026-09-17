@@ -201,6 +201,9 @@ final class CompanionManager: ObservableObject {
             useClaudeCustomizations: useClaudeCustomizations,
             quickAnswerSettings: quickAnswerSettings
         )
+        // The real "still thinking" signal: the moment the model opens a thinking block
+        // the cursor's pill shows, instead of waiting out the time-based fallback.
+        engine?.setThinkingStartedHandler { [weak self] in self?.showThinkingCueIfStillWaiting() }
         activeCoachEngineCache = engine
         return engine
     }
@@ -2777,6 +2780,13 @@ final class CompanionManager: ObservableObject {
                 self.isShowingThinkingCue = true
             }
         }
+    }
+
+    /// Shows the cue now if the request is still in flight and nothing has been heard or
+    /// seen yet (driven by the engine's thinking-started signal).
+    private func showThinkingCueIfStillWaiting() {
+        guard currentResponseTask != nil, !hasAnswerOrAudioStartedForCurrentRequest else { return }
+        isShowingThinkingCue = true
     }
 
     /// Marks that audio/answer has begun for the current request and hides the cue

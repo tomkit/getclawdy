@@ -48,6 +48,11 @@ protocol CoachEngine: AnyObject {
     /// inherit the default no-op.
     func prewarm(systemPrompt: String)
 
+    /// Installs a liveness hook fired when the model is visibly reasoning before any
+    /// text (Claude's thinking block). Engines that can't observe this inherit the
+    /// no-op default; the caller's time-based fallback still covers them.
+    func setThinkingStartedHandler(_ handler: @escaping @MainActor @Sendable () -> Void)
+
     /// Tear down any long-lived backend process this engine owns. Called when the
     /// user switches to a different engine, or when the app quits, so a warm process
     /// never outlives its selection. Engines without a warm process (e.g. Codex)
@@ -56,6 +61,9 @@ protocol CoachEngine: AnyObject {
 }
 
 extension CoachEngine {
+    /// Default: no observable reasoning signal (Codex reports nothing until it finishes).
+    func setThinkingStartedHandler(_ handler: @escaping @MainActor @Sendable () -> Void) {}
+
     /// Default: nothing to pre-warm. Codex spawns a fresh one-shot process per
     /// request, so there's no warm process to prime.
     func prewarm(systemPrompt: String) {}

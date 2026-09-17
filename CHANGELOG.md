@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **A built-in voice.** Clawdy now talks back with its own bundled voice (Kokoro, running on your Mac — nothing is sent anywhere) instead of the robotic system voice. Six voices to pick from in the panel; "Heart" is the default. ElevenLabs is still there if you'd rather use your own key. Teach it names and product words in `~/.clawdy/pronunciations.txt`. The download is about 170 MB bigger for it.
+- The "thinking…" pill by the claw now appears the moment the model actually starts reasoning (or after 2.5 s of silence), not after 10 s — a quiet visual sign the turn is alive, with no extra spoken cue.
 - **Pointing is more precise.** Every screenshot the model sees now carries a pixel ruler along its edges, so a `[POINT]` coordinate comes from a printed scale instead of a guess (the model's estimates were landing a couple hundred pixels off on wide screens).
 - **Draw, then ask about it.** When you draw on the screen while asking, Clawdy is now told the red strokes are your annotation, so "this road" means the one you traced (and it points at the marked thing, not a look-alike elsewhere).
 - **Research asks out loud.** When a research run needs a quick answer first, Clawdy now asks the question in its voice (at the next quiet moment) and the pill turns into the thing you're talking to — the question, a mic, and "⌃⌥ to answer". Hold the keys and answer; the run continues. The typed box is still there if you click the pill.

@@ -45,6 +45,10 @@ import Foundation
 enum ClaudeStreamEvent: Equatable {
     /// A streamed text delta (one chunk of the model's answer as it's written).
     case textDelta(String)
+    /// The model opened a thinking block: it is reasoning and no text is coming yet.
+    /// Surfaced ONLY as a liveness signal (the "thinking…" pill at the cursor); the
+    /// thought content itself is never read.
+    case thinkingStarted
     /// The terminal event for a turn: the authoritative final text (nil if the
     /// CLI omitted it) and whether the turn ended in an error.
     case result(text: String?, isError: Bool)
@@ -73,6 +77,15 @@ enum ClaudeStreamEvent: Equatable {
         if eventType == "result" {
             let isError = (jsonObject["is_error"] as? Bool) ?? false
             return .result(text: jsonObject["result"] as? String, isError: isError)
+        }
+
+        // { type: stream_event, event: { type: content_block_start, content_block: { type: "thinking" } } }
+        if eventType == "stream_event",
+           let event = jsonObject["event"] as? [String: Any],
+           (event["type"] as? String) == "content_block_start",
+           let contentBlock = event["content_block"] as? [String: Any],
+           (contentBlock["type"] as? String) == "thinking" {
+            return .thinkingStarted
         }
 
         // Streamed text deltas are wrapped: { type: stream_event, event: { type:
@@ -240,6 +253,9 @@ final class ClaudePersistentSession: @unchecked Sendable {
     /// in the History manifest. It NEVER changes how the session runs — no argument,
     /// working directory, or turn behavior depends on it. Invoked off the state queue.
     private let onRootSessionCaptured: (@Sendable (String) -> Void)?
+    /// Fired (on the main actor) when the model starts a thinking block for the active
+    /// request — the cue that a quiet turn is alive. Set by the engine's owner.
+    var onThinkingStarted: (@MainActor @Sendable () -> Void)?
     /// Hard cap on consecutive auto-respawns with no successful turn in between, so
     /// a CLI that dies instantly can't hot-loop. Reset to 0 by any successful turn.
     private let maxConsecutiveAutoRespawns = 3
@@ -763,6 +779,10 @@ final class ClaudePersistentSession: @unchecked Sendable {
 
         case .result(let resultText, let isError):
             handleResultEvent(resultText: resultText, isError: isError)
+
+        case .thinkingStarted:
+            guard let request = activeRequest, !request.wasCancelled, let onThinkingStarted else { return }
+            Task { @MainActor in onThinkingStarted() }
 
         case .textDelta(let textChunk):
             guard let request = activeRequest, !request.wasCancelled else { return }

@@ -80,8 +80,8 @@ struct ThinkingCueTests {
 
     // MARK: - Threshold constant
 
-    @Test func appearanceDelayIsTenSeconds() {
-        #expect(ThinkingCueState.appearanceDelaySeconds == 10)
+    @Test func appearanceDelayFallbackIsShortNowThatTheRealSignalDrivesTheCue() {
+        #expect(ThinkingCueState.appearanceDelaySeconds == 2.5)
     }
 
     @Test func customThresholdIsHonored() {
