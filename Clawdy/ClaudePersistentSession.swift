@@ -215,6 +215,8 @@ final class ClaudePersistentSession: @unchecked Sendable {
     /// toggles it, so a change spawns a fresh process with the new args. Also drives
     /// the empty-output guard: safe-mode is active exactly when this is false.
     private let useClaudeCustomizations: Bool
+    /// The `--model` / `--effort` for this process (fixed at spawn; a change rebuilds the engine).
+    private let quickAnswerSettings: QuickAnswerSettings
     private let perResponseTimeoutSeconds: TimeInterval
     private let idleTimeoutSeconds: TimeInterval
     /// Upper bound on how long a CANCELLED turn is allowed to drain to its terminal
@@ -313,6 +315,7 @@ final class ClaudePersistentSession: @unchecked Sendable {
         binaryPath: String,
         homeDirectoryPath: String = NSHomeDirectory(),
         useClaudeCustomizations: Bool = true,
+        quickAnswerSettings: QuickAnswerSettings = .recommended,
         perResponseTimeoutSeconds: TimeInterval = 60,
         idleTimeoutSeconds: TimeInterval = 120,
         cancelDrainTimeoutSeconds: TimeInterval = 6,
@@ -322,6 +325,7 @@ final class ClaudePersistentSession: @unchecked Sendable {
         self.binaryPath = binaryPath
         self.homeDirectoryPath = homeDirectoryPath
         self.useClaudeCustomizations = useClaudeCustomizations
+        self.quickAnswerSettings = quickAnswerSettings
         self.perResponseTimeoutSeconds = perResponseTimeoutSeconds
         self.idleTimeoutSeconds = idleTimeoutSeconds
         self.cancelDrainTimeoutSeconds = cancelDrainTimeoutSeconds
@@ -480,6 +484,14 @@ final class ClaudePersistentSession: @unchecked Sendable {
             requestedSystemPrompt: systemPrompt
         )
         if mustSpawn {
+            let reason = !hasLiveProcess ? "no-live-process"
+                : !isStreamSynced ? "stream-not-synced"
+                : "system-prompt-changed"
+            TurnLatencyLog.warmSpawn(
+                reason: reason,
+                model: quickAnswerSettings.model.rawValue,
+                effort: quickAnswerSettings.effort.rawValue
+            )
             do {
                 try spawnProcessOnStateQueue(systemPrompt: systemPrompt)
             } catch {
@@ -620,7 +632,8 @@ final class ClaudePersistentSession: @unchecked Sendable {
         newProcess.executableURL = URL(fileURLWithPath: binaryPath)
         newProcess.arguments = ClaudeCodeEngine.makeArguments(
             systemPrompt: systemPrompt,
-            useClaudeCustomizations: useClaudeCustomizations
+            useClaudeCustomizations: useClaudeCustomizations,
+            quickAnswerSettings: quickAnswerSettings
         )
         // No tool/file access is granted (we pass `--tools ""`), so the working
         // directory is irrelevant; HOME (set in the environment) is what matters

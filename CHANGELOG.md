@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Speed settings.** Pick the model (Sonnet, Opus, or your CLI's default) and effort for quick answers in the menu bar panel. Sonnet is now the default: about a second faster to the first spoken word than Opus, at half the cost.
+- Per-turn latency log (`log show --predicate 'subsystem == "com.clawdy.Clawdy" AND category == "latency"'`) so slow turns can be attributed to transcription, the model, or speech.
+
+### Fixed
+- Opening or closing a research results page no longer forces a cold restart of the warm `claude` process on the next question.
+
 ## [0.0.3] - 2026-09-16
 
 ### Added

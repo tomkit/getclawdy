@@ -279,6 +279,9 @@ class BuddyDictationManager: NSObject, ObservableObject {
     @Published private(set) var isRecordingFromKeyboardShortcut = false
     @Published private(set) var isKeyboardShortcutSessionActiveOrFinalizing = false
     @Published private(set) var isFinalizingTranscript = false
+    /// Whether the most recent finalized transcript was cut by the fallback timer (the
+    /// recognizer's final result hadn't arrived) — a latency diagnostic, nothing more.
+    private(set) var lastTranscriptCameFromFallbackTimer = false
     @Published private(set) var isPreparingToRecord = false
     @Published private(set) var currentAudioPowerLevel: CGFloat = 0
     @Published private(set) var recordedAudioPowerHistory = Array(
@@ -553,6 +556,7 @@ class BuddyDictationManager: NSObject, ObservableObject {
         let shouldSubmitFinalDraftWhenFallbackTriggers = shouldAutomaticallySubmitFinalDraft
         let fallbackWorkItem = DispatchWorkItem { [weak self] in
             Task { @MainActor in
+                self?.lastTranscriptCameFromFallbackTimer = true
                 self?.finishCurrentDictationSessionIfNeeded(
                     shouldSubmitFinalDraft: shouldSubmitFinalDraftWhenFallbackTriggers
                 )
@@ -584,6 +588,7 @@ class BuddyDictationManager: NSObject, ObservableObject {
                     self.latestRecognizedText = transcriptText
 
                     if self.isFinalizingTranscript {
+                        self.lastTranscriptCameFromFallbackTimer = false
                         self.finishCurrentDictationSessionIfNeeded(
                             shouldSubmitFinalDraft: self.shouldAutomaticallySubmitFinalDraft
                         )

@@ -169,7 +169,8 @@ final class CompanionManager: ObservableObject {
         if let cachedEngine = activeCoachEngineCache { return cachedEngine }
         let engine = coachEngineRegistry.makeEngine(
             for: selectedEngineKind,
-            useClaudeCustomizations: useClaudeCustomizations
+            useClaudeCustomizations: useClaudeCustomizations,
+            quickAnswerSettings: quickAnswerSettings
         )
         activeCoachEngineCache = engine
         return engine
@@ -666,6 +667,30 @@ final class CompanionManager: ObservableObject {
         activeCoachEngineCache = nil
         prewarmSelectedEngineIfInstalled()
     }
+
+    // MARK: - Quick-answer speed settings (Claude only)
+
+    /// The warm quick-answer process's `--model` / `--effort` (see `QuickAnswerSettings`
+    /// for the measurements behind the Sonnet default). Persisted; a change rebuilds the
+    /// warm engine exactly like the customizations toggle does.
+    @Published private(set) var quickAnswerSettings: QuickAnswerSettings = QuickAnswerSettings(
+        model: UserDefaults.standard.string(forKey: .quickAnswerModel).flatMap(QuickAnswerModel.init(rawValue:)) ?? .recommended,
+        effort: UserDefaults.standard.string(forKey: .quickAnswerEffort).flatMap(QuickAnswerEffort.init(rawValue:)) ?? .recommended
+    )
+
+    func setQuickAnswerSettings(_ settings: QuickAnswerSettings) {
+        guard settings != quickAnswerSettings else { return }
+        quickAnswerSettings = settings
+        UserDefaults.standard.set(settings.model.rawValue, forKey: .quickAnswerModel)
+        UserDefaults.standard.set(settings.effort.rawValue, forKey: .quickAnswerEffort)
+        // Model/effort are spawn args: rebuild the warm engine so the next turn uses them.
+        cancelInFlightTurnAndShutDownActiveEngineSession()
+        activeCoachEngineCache = nil
+        prewarmSelectedEngineIfInstalled()
+    }
+
+    /// Per-turn latency marks (`log show … category == "latency"`).
+    let turnLatencyLog = TurnLatencyLog()
 
     // MARK: - Text-to-Speech Settings
 
@@ -1425,6 +1450,10 @@ final class CompanionManager: ObservableObject {
                     },
                     submitDraftText: { [weak self] finalTranscript in
                         self?.lastTranscript = finalTranscript
+                        self?.turnLatencyLog.transcriptReady(
+                            viaFallback: self?.buddyDictationManager.lastTranscriptCameFromFallbackTimer ?? false,
+                            characterCount: finalTranscript.count
+                        )
                         print("🗣️ Companion received transcript: \(finalTranscript)")
                         ClawdyAnalytics.trackUserMessageSent(transcript: finalTranscript)
                         self?.sendTranscriptToClaudeWithScreenshot(transcript: finalTranscript)
@@ -1437,6 +1466,7 @@ final class CompanionManager: ObservableObject {
             // Without this, a quick press-and-release drops the release event and
             // leaves the waveform overlay stuck on screen indefinitely.
             ClawdyAnalytics.trackPushToTalkReleased()
+            turnLatencyLog.beginTurn()
             pendingKeyboardShortcutStartTask?.cancel()
             pendingKeyboardShortcutStartTask = nil
             buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
@@ -1542,8 +1572,7 @@ final class CompanionManager: ObservableObject {
     /// follow-up. Trivially-quick standalone questions are still answered inline,
     /// and a brand-new go-gather-and-build ask still routes to a skill marker.
     private static let companionFocusedFollowUpAddendum = """
-
-    focused research page (continue-thread routing):
+    (context for this turn only — focused research page, continue-thread routing:)
     right now the user has an open research page you generated for them in an earlier turn — they're looking at it. so ONE more routing option is live on THIS turn: continuing that page's own thread.
 
     when (and only when) the user's prompt is a genuine CONTINUATION of that open page — asking a question ABOUT its content or sources ("what sources did you use", "which of these is cheapest", "summarize the second section"), or asking to CHANGE/ITERATE on it ("make the background darker", "add a section on X", "remove the last row") — do NOT answer it yourself and do NOT speak. instead your ENTIRE reply must be exactly one line: the marker [FOLLOWUP] followed by a single clear sentence restating what they want. nothing before it, nothing after it, no spoken text, no point tag.
@@ -1727,12 +1756,18 @@ final class CompanionManager: ObservableObject {
         let hasFollowUpTarget = followUpTargetSessionID != nil
         let availableSkills = loadSkills()
         currentTurnSkills = availableSkills
-        let baseSystemPrompt = Self.companionVoiceResponseSystemPrompt(
+        let effectiveSystemPrompt = Self.companionVoiceResponseSystemPrompt(
             skills: availableSkills, routerTemplate: skillStore.loadRouterTemplate()
         )
-        let effectiveSystemPrompt = hasFollowUpTarget
-            ? baseSystemPrompt + Self.companionFocusedFollowUpAddendum
-            : baseSystemPrompt
+        // The focused-page follow-up guidance rides in THIS TURN'S USER MESSAGE, not the
+        // system prompt. `ClaudePersistentSession` respawns (a cold start + history
+        // re-prime) whenever the requested system prompt differs from the live one, so
+        // toggling the addendum in and out as results windows came and went was
+        // costing a cold spawn on the next turn each time. The user text is
+        // per-turn by nature, and the router honors the instruction just the same.
+        let effectiveUserPrompt = hasFollowUpTarget
+            ? Self.companionFocusedFollowUpAddendum + "\n\n" + transcript
+            : transcript
 
         currentResponseTask = Task {
             // Stay in processing (spinner) state — no streaming text displayed
@@ -1857,6 +1892,7 @@ final class CompanionManager: ObservableObject {
                     elevenLabsAPIKeyProvider: loadElevenLabsAPIKeyFromKeychain,
                     elevenLabsVoiceID: elevenLabsVoiceID,
                     onPlaybackStarted: { [weak self] in
+                        self?.turnLatencyLog.firstAudio()
                         self?.voiceState = .responding
                         // Audio has begun — the thinking cue is no longer needed.
                         self?.markAnswerOrAudioStartedHidingThinkingCue()
@@ -1870,17 +1906,26 @@ final class CompanionManager: ObservableObject {
                 currentSentenceBuffer = sentenceBuffer
                 currentResponseSpeaker = responseSpeaker
 
+                turnLatencyLog.requestSent(
+                    imageCount: labeledImages.count,
+                    systemPromptCharacterCount: effectiveSystemPrompt.count,
+                    historyExchangeCount: historyForAPI.count
+                )
                 let (fullResponseText, _) = try await coachEngine.analyzeImageStreaming(
                     images: labeledImages,
                     systemPrompt: effectiveSystemPrompt,
                     conversationHistory: historyForAPI,
-                    userPrompt: transcript,
+                    userPrompt: effectiveUserPrompt,
                     onTextChunk: { [weak self] accumulatedText in
                         self?.handleStreamedResponseText(accumulatedText)
                     }
                 )
 
                 guard !Task.isCancelled else { return }
+                turnLatencyLog.result(
+                    characterCount: fullResponseText.count,
+                    route: fullResponseText.hasPrefix("[") ? "directive" : "speak"
+                )
 
                 // ROUTING: the warm agent is the router. Decide — purely from the
                 // reply text + whether a research session is focused — whether this
@@ -2084,6 +2129,7 @@ final class CompanionManager: ObservableObject {
     /// buffer and speaks each newly-completed sentence early through the active
     /// streaming speaker. Called from the engine's onTextChunk on the main actor.
     private func handleStreamedResponseText(_ accumulatedText: String) {
+        turnLatencyLog.firstText()
         // The answer has begun arriving — hide the visual thinking cue (and stop
         // its countdown) immediately.
         markAnswerOrAudioStartedHidingThinkingCue()

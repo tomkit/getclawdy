@@ -28,6 +28,10 @@ enum DefaultsKey: String {
 
     /// "Use my Claude Code setup" — loads the user's own `claude` customizations.
     case useClaudeCustomizations = "useClaudeCustomizations"
+    /// The warm quick-answer path's `--model` choice (`QuickAnswerModel` raw value).
+    case quickAnswerModel = "quickAnswerModel"
+    /// The warm quick-answer path's `--effort` choice (`QuickAnswerEffort` raw value).
+    case quickAnswerEffort = "quickAnswerEffort"
 
     /// Which TTS engine the user has chosen (apple / elevenLabs).
     case selectedTTSEngine = "selectedTTSEngine"

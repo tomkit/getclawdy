@@ -67,6 +67,7 @@ final class ClaudeCodeEngine: CoachEngine {
         binaryPath: String,
         homeDirectoryPath: String = NSHomeDirectory(),
         useClaudeCustomizations: Bool = true,
+        quickAnswerSettings: QuickAnswerSettings = .recommended,
         manifestStore: ResearchManifestStore = .shared
     ) {
         // READ-ONLY capture of the warm session's own `session_id` for the History
@@ -83,6 +84,7 @@ final class ClaudeCodeEngine: CoachEngine {
             // respawns the warm process) when the user flips the toggle, so the new
             // arg set applies on the next turn.
             useClaudeCustomizations: useClaudeCustomizations,
+            quickAnswerSettings: quickAnswerSettings,
             // Keep the `claude` process alive for the WHOLE app lifetime: no idle
             // teardown, and an unexpected death self-heals via a proactive respawn.
             // Every push-to-talk reuses this one long-lived session.
@@ -116,7 +118,14 @@ final class ClaudeCodeEngine: CoachEngine {
     /// returns EMPTY output, which `ClaudePersistentSession` detects and surfaces as
     /// specific guidance rather than the generic snag. `--tools ""` still disables
     /// all tools and `--append-system-prompt` still governs behavior either way.
-    static func makeArguments(systemPrompt: String, useClaudeCustomizations: Bool) -> [String] {
+    /// `quickAnswerSettings` adds `--model` / `--effort` when the user chose something
+    /// other than "Default" (see `QuickAnswerSettings` for the measurements behind the
+    /// Sonnet default).
+    static func makeArguments(
+        systemPrompt: String,
+        useClaudeCustomizations: Bool,
+        quickAnswerSettings: QuickAnswerSettings = .recommended
+    ) -> [String] {
         var arguments = [
             "-p",
             "--append-system-prompt", systemPrompt,
@@ -124,6 +133,12 @@ final class ClaudeCodeEngine: CoachEngine {
         ]
         if !useClaudeCustomizations {
             arguments.append("--safe-mode")
+        }
+        if let model = quickAnswerSettings.model.claudeModelArgument {
+            arguments.append(contentsOf: ["--model", model])
+        }
+        if let effort = quickAnswerSettings.effort.claudeEffortArgument {
+            arguments.append(contentsOf: ["--effort", effort])
         }
         arguments.append(contentsOf: [
             "--input-format", "stream-json",

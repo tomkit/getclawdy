@@ -190,6 +190,7 @@ struct CompanionPanelView: View {
                     selectedEngineKind: companionManager.selectedEngineKind
                 ) {
                     claudeCustomizationsToggleRow
+                    quickAnswerSpeedRows
                 }
             case .voice:
                 ttsSettingsSection
@@ -789,6 +790,87 @@ struct CompanionPanelView: View {
             .scaleEffect(0.8)
         }
         .menuRowHover()
+    }
+
+    // MARK: - Quick-answer speed (Claude only)
+
+    /// The warm quick-answer path's model and effort. Sonnet is the recommended default
+    /// (measured about a second faster to first audio than Opus at half the cost);
+    /// effort is exposed to try, not because it measurably helps here. A change rebuilds
+    /// the warm process, so the next question uses it.
+    private var quickAnswerSpeedRows: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            speedRow(
+                label: "Model",
+                icon: "hare",
+                hint: companionManager.quickAnswerSettings.model.detail,
+                options: QuickAnswerModel.allCases,
+                title: { $0.displayName },
+                isSelected: { companionManager.quickAnswerSettings.model == $0 },
+                select: { model in
+                    var settings = companionManager.quickAnswerSettings
+                    settings.model = model
+                    companionManager.setQuickAnswerSettings(settings)
+                }
+            )
+            speedRow(
+                label: "Effort",
+                icon: "brain",
+                hint: "how hard it thinks before answering",
+                options: QuickAnswerEffort.allCases,
+                title: { $0.displayName },
+                isSelected: { companionManager.quickAnswerSettings.effort == $0 },
+                select: { effort in
+                    var settings = companionManager.quickAnswerSettings
+                    settings.effort = effort
+                    companionManager.setQuickAnswerSettings(settings)
+                }
+            )
+        }
+    }
+
+    private func speedRow<Option: Identifiable>(
+        label: String,
+        icon: String,
+        hint: String,
+        options: [Option],
+        title: @escaping (Option) -> String,
+        isSelected: @escaping (Option) -> Bool,
+        select: @escaping (Option) -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(DS.Font.overlayBody)
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .frame(width: 16)
+                Text(label)
+                    .font(DS.Font.detailBody)
+                    .foregroundColor(DS.Colors.textSecondary)
+                Spacer()
+                Text(hint)
+                    .font(DS.Font.overlayCaptionRegular)
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .lineLimit(1)
+            }
+            HStack(spacing: 0) {
+                ForEach(options) { option in
+                    MenuSegmentOptionButton(
+                        title: title(option),
+                        isSelected: isSelected(option),
+                        action: { select(option) }
+                    )
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
+                    .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+            )
+        }
     }
 
     // MARK: - Engine Picker

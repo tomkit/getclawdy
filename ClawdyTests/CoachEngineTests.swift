@@ -291,6 +291,29 @@ struct CoachEngineTests {
 
     // MARK: - CLI argument construction
 
+    /// The quick-answer model/effort settings become `--model` / `--effort`; "Default"
+    /// omits the flag so the user's own `claude` setting applies. Sonnet is the
+    /// recommended default (see `QuickAnswerSettings` for the measurements).
+    @Test func claudeCodeArgumentsCarryTheQuickAnswerModelAndEffort() {
+        let recommended = ClaudeCodeEngine.makeArguments(systemPrompt: "s", useClaudeCustomizations: true)
+        let modelIndex = recommended.firstIndex(of: "--model")
+        #expect(modelIndex != nil && recommended[modelIndex! + 1] == "sonnet")
+        #expect(!recommended.contains("--effort"), "effort defaults to the harness setting")
+
+        let tuned = ClaudeCodeEngine.makeArguments(
+            systemPrompt: "s", useClaudeCustomizations: true,
+            quickAnswerSettings: QuickAnswerSettings(model: .opus, effort: .low)
+        )
+        #expect(tuned[tuned.firstIndex(of: "--model")! + 1] == "opus")
+        #expect(tuned[tuned.firstIndex(of: "--effort")! + 1] == "low")
+
+        let inherited = ClaudeCodeEngine.makeArguments(
+            systemPrompt: "s", useClaudeCustomizations: true,
+            quickAnswerSettings: QuickAnswerSettings(model: .harnessDefault, effort: .harnessDefault)
+        )
+        #expect(!inherited.contains("--model") && !inherited.contains("--effort"))
+    }
+
     @Test func claudeCodeArgumentsUsePrintModeStreamJSONInputAndNoTools() {
         // Default setting: customizations load (safe-mode OMITTED).
         let arguments = ClaudeCodeEngine.makeArguments(systemPrompt: "you are clawdy", useClaudeCustomizations: true)

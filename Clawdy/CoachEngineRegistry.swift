@@ -55,7 +55,11 @@ final class CoachEngineRegistry {
     /// `useClaudeCustomizations` mirrors the app-wide "Use my Claude Code setup"
     /// setting and is threaded into the Claude engine so a rebuild picks up the
     /// current toggle (Codex is unaffected — it takes no such flag).
-    func makeEngine(for kind: CoachEngineKind, useClaudeCustomizations: Bool) -> CoachEngine? {
+    func makeEngine(
+        for kind: CoachEngineKind,
+        useClaudeCustomizations: Bool,
+        quickAnswerSettings: QuickAnswerSettings = .recommended
+    ) -> CoachEngine? {
         guard let detected = detectedEngines.first(where: { $0.kind == kind }) else {
             return nil
         }
@@ -63,7 +67,8 @@ final class CoachEngineRegistry {
         case .claudeCode:
             return ClaudeCodeEngine(
                 binaryPath: detected.binaryPath,
-                useClaudeCustomizations: useClaudeCustomizations
+                useClaudeCustomizations: useClaudeCustomizations,
+                quickAnswerSettings: quickAnswerSettings
             )
         case .codex:
             return CodexEngine(binaryPath: detected.binaryPath)
