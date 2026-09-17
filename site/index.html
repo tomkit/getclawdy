@@ -89,6 +89,16 @@
     .eyes{ opacity:0; } .cracks path, .cracks-glow path{ stroke-dashoffset:0; } .hole, .hole-rim{ opacity:1; } .shard{ opacity:0; } .peek{ opacity:0; } .land, .cursor-arrow, .hero-bubble{ opacity:1; } .hero-trail{ opacity:0.55; }
   }
 
+  /* ---------- VALUE PROPS ---------- */
+  .props{ padding: 24px clamp(20px,6vw,64px) 56px; }
+  .props ul{ list-style:none; margin:0 auto; padding:0; max-width:1100px; display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 20px clamp(16px,3vw,40px); }
+  .props li{ display:flex; flex-direction:column; gap:6px; padding-top:18px; border-top:2px solid var(--ink); }
+  .props svg{ width:26px; height:26px; color:var(--red); margin-bottom:6px; }
+  .props b{ font-size:19px; letter-spacing:-0.015em; }
+  .props span{ font-size:15px; line-height:1.5; color:var(--muted); }
+  @media (max-width:760px){ .props ul{ grid-template-columns: 1fr 1fr; } }
+  @media (max-width:440px){ .props ul{ grid-template-columns: 1fr; } }
+
   /* ---------- MOMENTS ---------- */
   .moments{ padding: 72px 0 24px; border-top:1px solid var(--line); }
   .moments-intro{ text-align:center; padding: 0 clamp(20px,6vw,64px) 24px; max-width: 720px; margin: 0 auto; }
@@ -232,6 +242,16 @@
         <li><b>2</b> Clawdy lets it out.</li>
         <li><b>3</b> Now it rides along with your cursor and points.</li>
       </ol>
+    </section>
+
+
+    <section class="props" aria-label="What Clawdy does">
+      <ul>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg><b>It sees what you see.</b><span>Every window, every app, every monitor.</span></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><b>Just say it.</b><span>Hold a key and talk. No typing, no prompts.</span></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v10H9l-5 4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 9h8M8 12h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><b>It talks back.</b><span>Out loud, in plain words, while you keep working.</span></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 8-6 2-2 6z" fill="currentColor"/></svg><b>It points.</b><span>The claw flies to the exact spot on your screen.</span></li>
+      </ul>
     </section>
 
     <section class="moments">
