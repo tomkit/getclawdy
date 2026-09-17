@@ -253,13 +253,16 @@ struct ClawdySkillStoreTests {
         let researchFile = store.clawdySkillFileURL(id: ClawdySkill.builtInResearchID)
         #expect(FileManager.default.fileExists(atPath: researchFile.path))
         #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("README.md").path))
-        #expect(store.loadSkills() == [.builtInResearch], "the shipped file loads as exactly the built-in skill")
+        let installed = store.loadSkills()
+        #expect(installed.first == .builtInResearch, "the shipped research file loads as exactly the built-in skill")
+        #expect(installed.map(\.id) == [ClawdySkill.builtInResearchID, "trip-planner"], "the bundled example skill ships too")
+        #expect(installed[1].tag == "TRIP_PLANNER" && installed[1].planPhase == false && installed[1].deliverable == .html)
 
         // The user's edits survive a second install (never overwritten).
         try "---\ndescription: edited\nclawdy-tag: RESEARCH\n---\n## Execute message\nedited {{outputPath}}".write(to: researchFile, atomically: true, encoding: .utf8)
         store.installDefaultsIfMissing()
         let loaded = store.loadSkills()
-        #expect(loaded.count == 1)
+        #expect(loaded.count == 2)
         #expect(loaded[0].description == "edited")
         #expect(loaded[0].executeMessageTemplate == "edited {{outputPath}}")
         #expect(loaded[0].planSystemPrompt == ClawdySkill.builtInResearch.planSystemPrompt)

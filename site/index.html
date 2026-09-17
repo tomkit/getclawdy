@@ -130,6 +130,32 @@
   .moment-art{ min-width:0; }
   .clawdy-bubble:not(.hero-bubble){ animation: bubblePop 0.55s cubic-bezier(.34,1.56,.64,1) both; animation-delay: .4s; }
 
+
+  /* ---------- SKILLS ---------- */
+  .skills{ padding: 72px clamp(20px,6vw,64px) 40px; border-top:1px solid var(--line); max-width:1200px; margin:0 auto; }
+  .skills-intro{ text-align:center; max-width:720px; margin:0 auto 40px; }
+  .skills-intro h2{ font-size: clamp(28px,3.6vw,44px); letter-spacing:-0.025em; line-height:1.05; margin:0 0 12px; text-wrap:balance; }
+  .skills-intro p{ color:var(--muted); font-size:17px; margin:0; line-height:1.55; }
+  .skills-intro b{ color:var(--ink); font-weight:600; }
+  .route{ list-style:none; margin:0 auto 40px; padding:0; display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 20px clamp(16px,3vw,32px); max-width:1000px; }
+  .route li{ display:flex; flex-direction:column; gap:12px; padding-top:18px; border-top:2px solid var(--ink); }
+  .route-num{ display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; background:var(--red-soft); color:var(--red-deep); font-size:12px; font-weight:700; }
+  .route li p{ margin:0; color:var(--muted); font-size:15px; line-height:1.5; }
+  .route-you{ background:#EFE8DA; border-radius:18px 18px 18px 4px; padding:12px 16px; font-weight:700; font-size:18px; letter-spacing:-0.02em; }
+  .route-tag{ background:#15161B; color:#FFF; border-radius:12px; padding:12px 16px; font-size:14px; font-weight:500; }
+  .route-tag code{ font-family: ui-monospace, Menlo, monospace; color:#FF8A7E; font-size:13px; margin-right:6px; }
+  .route-page{ background:var(--card); border:1.5px solid var(--line); border-radius:12px; padding:10px 14px; display:flex; align-items:center; gap:10px; font-weight:600; }
+  .route-page img{ width:64px; height:auto; }
+  .skill-file{ max-width:860px; margin:0 auto; }
+  .skill-file-head{ display:flex; align-items:center; gap:6px; background:#1C1D24; border-radius:12px 12px 0 0; padding:10px 14px; }
+  .skill-file-head .dot{ width:10px; height:10px; border-radius:50%; background:#3A3B45; }
+  .skill-file-head .fname{ margin-left:8px; color:#9A9CA8; font-family: ui-monospace, Menlo, monospace; font-size:12px; }
+  .skill-file pre{ margin:0; background:#111217; color:#E7E2D8; border-radius:0 0 12px 12px; padding:18px 20px; overflow-x:auto; font-family: ui-monospace, Menlo, monospace; font-size:13px; line-height:1.55; }
+  .skill-file .fm{ color:#9A9CA8; }
+  .skill-file-note{ color:var(--muted); font-size:15px; line-height:1.55; margin:14px 4px 0; }
+  .skill-file-note code{ font-family: ui-monospace, Menlo, monospace; font-size:13px; background:var(--chrome); padding:1px 5px; border-radius:4px; color:var(--ink); }
+  @media (max-width:760px){ .route{ grid-template-columns: 1fr; } .skills{ padding: 48px 20px 24px; } }
+
   /* ---------- FOOT ---------- */
   .foot{ text-align:center; padding: 72px clamp(20px,6vw,64px) 56px; border-top:1px solid var(--line); }
   .foot-mascot{ display:block; margin:0 auto 18px; width:150px; height:auto; }
@@ -422,6 +448,47 @@
           </svg>
         </div>
       </article>
+    </section>
+
+    <section class="skills">
+      <div class="skills-intro">
+        <h2>It learns new tricks.</h2>
+        <p>Big asks get handed to a <b>skill</b>: a separate agent that goes off, does the work, and comes back with a page on your screen or a spoken answer. Your Claude Code skills already work by voice. Teach it a new one with a single file.</p>
+      </div>
+
+      <ol class="route">
+        <li>
+          <span class="route-num">1</span>
+          <div class="route-you">&ldquo;Plan me three days in Kyoto.&rdquo;</div>
+          <p>You say it.</p>
+        </li>
+        <li>
+          <span class="route-num">2</span>
+          <div class="route-tag"><code>[TRIP_PLANNER]</code> plan a 3-day kyoto itinerary</div>
+          <p>Clawdy decides it's a job for a skill, not a quick answer, and hands it off.</p>
+        </li>
+        <li>
+          <span class="route-num">3</span>
+          <div class="route-page"><img src="mascot-point-left.png" alt="" width="64"><span>Kyoto, day by day</span></div>
+          <p>The skill builds the page and opens it. Keep talking to change it.</p>
+        </li>
+      </ol>
+
+      <div class="skill-file">
+        <div class="skill-file-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">~/.clawdy/skills/recipe-finder/SKILL.md</span></div>
+<pre><code><span class="fm">---
+name: recipe-finder
+description: finds a recipe for what the user has on hand and builds a page with it.
+  use for "what can i make with X". example — user says "what can i make with
+  eggs and spinach": [RECIPE_FINDER] find a recipe using eggs and spinach and build a page.
+allowed-tools: WebSearch, WebFetch, Write
+clawdy-deliverable: html
+---</span>
+
+Find a good recipe for: {{task}}. Search the web, pick one, and write ONE
+self-contained HTML page to {{outputPath}} with ingredients, steps, and timing.</code></pre>
+        <p class="skill-file-note">Same <code>SKILL.md</code> format as Claude Code. The description tells the router when to use it; the body tells the agent what to do. Then just say &ldquo;what can I make with eggs and spinach.&rdquo;</p>
+      </div>
     </section>
 
     <section class="foot">

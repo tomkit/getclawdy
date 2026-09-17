@@ -16,7 +16,7 @@
   <img src="assets/clawdy-hero.png" width="860" alt="Clawdy, a small red lobster, bursting out through a jagged hole in a shattered terminal window, next to a spreadsheet with a broken cell." />
 </p>
 
-Clawdy has no AI of its own. It runs on the **Claude Code** or **Codex** you already have installed, so there is nothing new to sign up for and no separate bill. Your voice never leaves your Mac.
+Clawdy has no AI of its own. It runs on the Claude Code or Codex you already have installed. There's nothing new to sign up for and no separate bill, and your voice never leaves your Mac.
 
 - **It sees what you see.** Every window, every app, every monitor.
 - **Just say it.** Hold **Control + Option** and talk. No typing, no prompts.
@@ -37,7 +37,7 @@ Clawdy has no AI of its own. It runs on the **Claude Code** or **Codex** you alr
 - "What do they actually want from me in this email?"
 - "Find me three laptops under $900 and put it on one page."
 
-Clawdy answers out loud and the claw lands on the button, toggle, field, or sentence it's talking about. For the big asks, it goes and researches the web and opens a page on your screen.
+Clawdy answers out loud and the claw lands on the button, toggle, field, or sentence it's talking about. For the big asks, it goes off, researches the web, and opens a page on your screen.
 
 ## What it looks like
 
@@ -52,7 +52,7 @@ Clawdy answers out loud and the claw lands on the button, toggle, field, or sent
 3. Make sure one of these is installed and signed in. If you already use it, you're done:
    - [Claude Code](https://docs.anthropic.com/en/docs/claude-code): `npm install -g @anthropic-ai/claude-code`, then run `claude` once to sign in.
    - [Codex](https://github.com/openai/codex): `npm install -g @openai/codex`, then `codex login`.
-4. Click the claw in your menu bar, then hold **Control + Option** and talk.
+4. Click the claw in your menu bar, hold **Control + Option**, and talk.
 
 Needs macOS 14.2 (Sonoma) or later. Works on Intel and Apple Silicon.
 
@@ -60,43 +60,53 @@ Optional: add an [ElevenLabs](https://elevenlabs.io) key in the menu-bar panel f
 
 ## For the technically curious
 
-- **Your CLI, your tokens.** Clawdy shells out to the `claude` or `codex` binary on your machine. Every answer is billed to the subscription that CLI is signed into. No API keys, no proxy, no backend.
-- **Your whole setup comes along.** Clawdy runs your CLI as-is, so the CLAUDE.md, skills, plugins, hooks, and MCP servers you've configured in your harness all load, exactly as they do in your terminal.
-- **Pick it up in the shell whenever you want.** Clawdy drives a real CLI session, so you can resume any conversation in the terminal with `claude --resume <id>` or `codex resume <id>` (there's a "Resume in Terminal" button in the History window).
-- **It runs your skills.** Your ordinary Claude Code skills (`~/.claude/skills`) are offered to Clawdy's router as-is, and you can write Clawdy-specific ones in `~/.clawdy/skills` using the same `SKILL.md` format. See [Skills and routing](#skills-and-routing).
+- **Your CLI, your tokens.** Clawdy shells out to the `claude` or `codex` binary on your machine. Every answer is billed to whatever subscription that CLI is signed into. No API keys, no proxy, no backend.
+- **Your whole setup comes along.** Clawdy runs your CLI as-is, so the CLAUDE.md, skills, plugins, hooks, and MCP servers you've set up all load, same as in your terminal.
+- **Pick it up in the shell whenever you want.** Every Clawdy conversation is a real CLI session. Resume one with `claude --resume <id>` or `codex resume <id>`, or hit "Resume in Terminal" in the History window.
+- **It runs your skills.** Your existing Claude Code skills work by voice, and you can write Clawdy-specific ones. Details below.
 
 ## Skills and routing
 
-Every question you ask goes to the warm voice agent first. It is also the **router**: based on the loaded skills, it either answers out loud right away, or hands the request to a skill that runs in its own agent process. Its decision rule is the same one a coding agent uses to decide between just doing a task and stopping to plan: quick, single-step, answerable-now questions are answered inline; anything that needs gathering from the web, several steps, a built artifact, or clearly matches a skill's description gets routed. On-screen pointing questions ("where do I click?") are always answered inline, never routed.
+**The short version.** Most of what you ask Clawdy gets a quick spoken answer. Some things are bigger than a quick answer, like "research this and build me a page" or "plan me three days in Kyoto." For those, Clawdy hands the job to a *skill*: a separate agent that goes off, does the work, and comes back with a page on your screen or a spoken result. You don't pick the skill. Clawdy does.
 
-Routing is a one-line reply from the agent that Clawdy intercepts instead of speaking:
+**How routing works.** Every question goes to Clawdy's voice agent first. It reads the list of skills it knows about and makes a call:
 
-```
-[RESEARCH] compare the three best standing desks under $1000 and build a page
-[SKILL:pdf] summarize the PDF that's open
-```
+- Quick and answerable right now (from your screen or general knowledge)? It just answers.
+- Needs the web, several steps, or a built artifact, or clearly matches a skill's description? It replies with a single line instead of talking, like `[RESEARCH] compare the three best standing desks under $1000 and build a page`, and Clawdy starts that skill in its own process.
+- "Where do I click?" style questions are always answered inline with the claw. Never routed.
 
-**Two kinds of skills are available:**
+A skill's `description` is what the router reads to make that call, the same way Claude Code decides when to use one of its own skills.
 
-- **Your harness skills.** Anything in `~/.claude/skills/*/SKILL.md` (or `~/.codex/skills` when Codex is selected). Nothing to configure: the skill's `description` is the routing rule, exactly as it is for the CLI's own auto-invocation, and its `allowed-tools` govern the run. Clawdy starts a dedicated `claude -p` run that invokes the skill for your task, then **speaks the result back**. Requires "Use my Claude Code setup" to be on (the default).
-- **Clawdy skills.** Skills written for Clawdy's interface (voice in; a page on your screen or a spoken answer out), in `~/.clawdy/skills/<name>/SKILL.md`. Same format, plus optional `clawdy-*` frontmatter keys. The built-in `research` skill is written there on first launch; edit it to retune research, or add a folder to teach Clawdy something new. Changes apply on your next question.
+**Two kinds of skills.**
 
-A minimal Clawdy skill:
+1. *Your Claude Code skills.* Anything in `~/.claude/skills` (or `~/.codex/skills` if you use Codex) is already available by voice. Nothing to set up. Clawdy runs the skill in a dedicated `claude` session and reads the result back to you.
+2. *Clawdy skills.* Same `SKILL.md` format, but written for Clawdy's interface: voice in, and a page on your screen or a spoken answer out. They live in `~/.clawdy/skills`.
+
+**The bundled Clawdy skills.** Clawdy writes these to `~/.clawdy/skills` the first time it runs, so you can read them and change them:
+
+| Skill | You say | What happens |
+|---|---|---|
+| `research` | "Find the best noise-cancelling headphones and build me a page." | Researches the web, asks a clarifying question if it needs one, builds a self-contained page, and opens it. Keep talking to it to change the page. |
+| `trip-planner` | "Plan me three days in Kyoto." | Builds a day-by-day itinerary page with neighborhoods and places to eat. This one is the example to copy. |
+
+Edit `research/SKILL.md` to change how research behaves. Changes apply on your next question; no relaunch.
+
+**Adding a new one.** Make a folder in `~/.clawdy/skills` with a `SKILL.md`. The description tells the router when to use it; the body tells the agent what to do.
 
 ```markdown
 ---
-name: trip-planner
-description: plans a multi-day trip and builds an itinerary page. use for "plan me N days in <place>". example — user says "plan me 3 days in kyoto": [TRIP_PLANNER] plan a 3-day kyoto itinerary.
+name: recipe-finder
+description: finds a recipe for what the user has on hand and builds a page with it. use for "what can i make with X", "find me a recipe for Y". example — user says "what can i make with eggs and spinach": [RECIPE_FINDER] find a recipe using eggs and spinach and build a page.
 allowed-tools: WebSearch, WebFetch, Write
-clawdy-deliverable: html      # or `none` for a spoken result
+clawdy-deliverable: html
 ---
 
-Plan the trip {{task}} and write ONE self-contained HTML page to {{outputPath}}.
+Find a good recipe for: {{task}}. Search the web, pick one, and write ONE self-contained HTML page to {{outputPath}} with ingredients, steps, and how long it takes.
 ```
 
-Only `description` is required; the body is what the agent does. For full control over each phase (plan / execute / follow-up, Claude and Codex variants) split the body into `## Plan`, `## Execute`, `## Execute message`, `## Follow-up`, `## Follow-up message`, `## Codex execute`, `## Codex follow-up`, the way `research/SKILL.md` does. Placeholders: `{{task}}`, `{{outputPath}}`, `{{outputDir}}`, `{{skill}}`. `POINT` and `FOLLOWUP` are reserved markers.
+Then say "what can I make with eggs and spinach." That's it.
 
-How a routed run works: a page-producing skill runs a plan/clarify phase (it may ask you one round of questions) and then an execute phase with a narrow tool allowlist, a spend cap, and a scoped output directory; the page opens in Clawdy's results window and you can keep talking to it. A spoken-result skill runs one execute turn and reads its final answer aloud. Either way the run is a real CLI session you can resume in the terminal.
+The marker in brackets comes from the name (`recipe-finder` becomes `[RECIPE_FINDER]`). Set `clawdy-deliverable: none` for a skill that should just speak its answer instead of opening a page. For full control over each phase (planning, executing, follow-ups), look at how `research/SKILL.md` is split into sections. `~/.clawdy/skills/README.md` has the complete list of options.
 
 ## Build from source
 
@@ -113,7 +123,7 @@ In Xcode:
 1. Select the **Clawdy** scheme and the **My Mac** destination.
 2. Under the **Clawdy** target → **Signing & Capabilities**, pick your **Team**. Automatic signing with a personal Apple ID is fine for running locally.
 3. Press **Cmd + R**. The app appears in your menu bar (there's no dock icon and no main window).
-4. On first launch, grant **Microphone**, **Speech Recognition**, **Accessibility**, and **Screen Recording** when macOS asks, then quit and relaunch. These are tied to the signed binary, so you'll be asked again whenever the signature changes.
+4. On first launch, grant **Microphone**, **Speech Recognition**, **Accessibility**, and **Screen Recording** when macOS asks, then quit and relaunch. These are tied to the signed binary, so you'll be asked again if the signature changes.
 
 To run the unit tests, use **Cmd + U**, or from the terminal:
 
@@ -121,7 +131,7 @@ To run the unit tests, use **Cmd + U**, or from the terminal:
 xcodebuild test -project Clawdy.xcodeproj -scheme Clawdy -destination 'platform=macOS' -only-testing:ClawdyTests CODE_SIGNING_ALLOWED=NO
 ```
 
-Prefer building from Xcode for day-to-day work: building with `xcodebuild` from the terminal can invalidate the macOS privacy permissions above, so the app may ask for them again.
+Prefer building from Xcode for day-to-day work. Building with `xcodebuild` from the terminal can invalidate the macOS privacy permissions above, so the app may ask for them again.
 
 **Verifying a release download.** Each release ships a `SHA256SUMS` file. The DMG is a universal binary, signed with a Developer ID and notarized by Apple:
 

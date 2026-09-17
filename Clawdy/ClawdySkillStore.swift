@@ -116,16 +116,25 @@ struct ClawdySkillStore {
 
     // MARK: - First-launch install
 
-    /// Writes the built-in research skill and a README into the Clawdy skills directory
-    /// if they aren't there yet. Never overwrites: once shipped, the files are the user's.
+    /// The skills Clawdy ships into `~/.clawdy/skills` on first launch: the built-in
+    /// research skill (rendered from code so it can never drift) and a small example
+    /// skill, `trip-planner`, that doubles as the template for writing a new one.
+    static let bundledSkillFiles: [(id: String, markdown: String)] = [
+        (ClawdySkill.builtInResearchID, ClawdySkillFile.render(.builtInResearch)),
+        ("trip-planner", bundledTripPlannerMarkdown)
+    ]
+
+    /// Writes the bundled skills and a README into the Clawdy skills directory if they
+    /// aren't there yet. Never overwrites: once shipped, the files are the user's.
     func installDefaultsIfMissing() {
-        let researchFileURL = clawdySkillFileURL(id: ClawdySkill.builtInResearchID)
-        if !fileManager.fileExists(atPath: researchFileURL.path) {
+        for bundled in Self.bundledSkillFiles {
+            let fileURL = clawdySkillFileURL(id: bundled.id)
+            guard !fileManager.fileExists(atPath: fileURL.path) else { continue }
             do {
-                try fileManager.createDirectory(at: researchFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try ClawdySkillFile.render(.builtInResearch).write(to: researchFileURL, atomically: true, encoding: .utf8)
+                try fileManager.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try bundled.markdown.write(to: fileURL, atomically: true, encoding: .utf8)
             } catch {
-                print("⚠️ Could not write the built-in research skill to \(researchFileURL.path): \(error)")
+                print("⚠️ Could not write the bundled skill '\(bundled.id)' to \(fileURL.path): \(error)")
             }
         }
         let readmeURL = clawdySkillsDirectory.appendingPathComponent("README.md")
@@ -138,6 +147,23 @@ struct ClawdySkillStore {
             }
         }
     }
+
+    /// The bundled example skill: a plain SKILL.md (description + body, no phase
+    /// sections) that shows the minimum needed to teach Clawdy a page-producing job.
+    static let bundledTripPlannerMarkdown = """
+    ---
+    name: trip-planner
+    description: plans a multi-day (or single-day) trip and builds a self-contained itinerary page with a day-by-day plan, neighborhoods, and a few specific places to eat. use for asks like "plan me N days in <place>", "put together an itinerary for <place>", "what should i do with a weekend in <place>". do NOT use for a quick fact about a place (answer that inline). example — user says "plan me 3 days in kyoto": [TRIP_PLANNER] plan a 3-day kyoto itinerary with a day-by-day plan and places to eat.
+    allowed-tools: WebSearch, WebFetch, Write
+    clawdy-deliverable: html
+    clawdy-plan-phase: false
+    clawdy-max-budget-usd: 3
+    ---
+
+    plan this trip: {{task}}
+
+    research the destination on the web now, yourself, in this one turn (do not defer to any background job). then write ONE self-contained HTML itinerary page to the absolute path {{outputPath}}: a short intro, then one section per day with a morning / afternoon / evening plan, the neighborhood each stop is in, and one specific place to eat per day with a one-line reason. keep it practical and specific — real place names, rough timings, how to get between stops. inline <style> only, no external scripts, fonts, or stylesheets; a subtle red accent (#E5342B) for headings. do not write any other file. when you're done, briefly confirm in one sentence.
+    """
 
     static let readmeText = """
     # Clawdy skills
