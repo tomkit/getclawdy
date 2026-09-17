@@ -267,8 +267,8 @@ enum PointAudioSyncMapper {
     /// flowing). Everything else — Apple TTS, or ElevenLabs that produced no/empty alignment
     /// (a failure or fallback) — means timing is truly unavailable, so the untimed walk runs.
     /// The untimed walk is never a silent mask over an available-but-mis-decided timed path.
-    static func shouldUseTimedPointing(providerIsElevenLabs: Bool, firstClipAlignment: SpeechClipAlignment?) -> Bool {
-        guard providerIsElevenLabs else { return false }
+    static func shouldUseTimedPointing(providerHasTiming: Bool, firstClipAlignment: SpeechClipAlignment?) -> Bool {
+        guard providerHasTiming else { return false }
         guard let firstClipAlignment, !firstClipAlignment.isEmpty else { return false }
         return true
     }

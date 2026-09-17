@@ -2228,12 +2228,16 @@ final class CompanionManager: ObservableObject {
                     let audioSynced = await resolveAudioSyncEligibility()
                     guard !Task.isCancelled else { return }
                     pointingAdvanceIsAudioSynced = audioSynced
-                    beginPointingSequence(pointingTargets)
                     if audioSynced {
+                        // The scheduler begins the sequence itself, when target 0's word is
+                        // about to be spoken.
                         startAudioSyncedPointingSchedule(
                             spokenPositionsByTargetIndex: pointingTargetsWithSpokenPositions.map(\.spokenPosition),
-                            spokenText: spokenText
+                            spokenText: spokenText,
+                            beginSequence: { [weak self] in self?.beginPointingSequence(pointingTargets) }
                         )
+                    } else {
+                        beginPointingSequence(pointingTargets)
                     }
                     print("🎯 Element pointing sequence: \(pointingTargets.count) target(s), audioSynced=\(audioSynced)")
                 } else {
@@ -2422,101 +2426,83 @@ final class CompanionManager: ObservableObject {
     /// ElevenLabs is the resolved provider — Apple TTS (which never produces timing) is
     /// decided instantly so the untimed walk starts promptly, never after a needless wait.
     private func resolveAudioSyncEligibility() async -> Bool {
-        guard resolvedTTSProviderKind == .elevenLabs else { return false }
-        // Wait (bounded) for clip 0's report. Because the speaker now emits a report on EVERY
-        // path (real timing on success, nil alignment on Apple fallback — BLOCKER 3), this
-        // resolves as soon as clip 0's audio starts; it only times out if clip 0 never plays.
+        // Both providers report per-clip timing now: ElevenLabs with real character
+        // timestamps, Kokoro with characters spread evenly over each sentence clip.
+        // Wait (bounded) for clip 0's report. Because the speaker emits a report on EVERY
+        // path (nil alignment on a fallback — BLOCKER 3), this resolves as soon as clip 0's
+        // audio starts; it only times out if clip 0 never plays.
         let firstClip = await awaitClipReport(ordinal: 0, maxWaitPolls: Self.audioSyncDecisionMaxPolls)
         return PointAudioSyncMapper.shouldUseTimedPointing(
-            providerIsElevenLabs: true,
+            providerHasTiming: true,
             firstClipAlignment: firstClip?.timing.alignment
         )
     }
 
     /// Starts the scheduler that walks the ordered pointing targets in step with the spoken
-    /// audio. Target 0 is already shown by `beginPointingSequence`; this times the ADVANCE to
-    /// targets 1…n-1 so the cursor ARRIVES on each just before its element is named. Each
-    /// advance is scheduled against the SAME clip's playhead its word time was computed from
-    /// (TRAP 2). If a needed clip has no per-word timing, that target degrades to the untimed
-    /// fixed dwell rather than hanging or jumping (BLOCKER 3).
-    private func startAudioSyncedPointingSchedule(spokenPositionsByTargetIndex: [Int], spokenText: String) {
+    /// audio, so the cursor ARRIVES on each element just before it is named. Works for any
+    /// number of clips (ElevenLabs: first sentence + batched remainder; Kokoro: one clip per
+    /// sentence): each target's NAMING word is located on the spoken-text ruler, the clip
+    /// containing it is found by walking the reported clips in order (awaiting a clip that
+    /// hasn't started yet — a DESIRED wait, the cursor dwells on the prior target), and the
+    /// advance is scheduled against THAT clip's own playhead (TRAP 2). Target 0 is timed the
+    /// same way (the sequence begins when its word is about to be spoken), so a long reply
+    /// no longer sends the cursor off the moment the text arrives. A clip without timing
+    /// degrades that target to the untimed fixed dwell rather than hanging (BLOCKER 3).
+    private func startAudioSyncedPointingSchedule(spokenPositionsByTargetIndex: [Int], spokenText: String, beginSequence: @escaping @MainActor () -> Void) {
         audioSyncPointingScheduler?.cancel()
         let targetCount = spokenPositionsByTargetIndex.count
 
-        // BLOCKER 2: locate clip 0 within the spoken text so point positions and the clip
-        // boundary share ONE coordinate system (the spoken-text ruler, including the
-        // inter-clip separator whitespace). `resolveAudioSyncEligibility` guaranteed clip 0's
-        // report is present. A tag at/just after clip 0's last word stays anchored to clip 0.
-        let clipZeroText = audioSyncClipReports[0]?.clipText ?? ""
-        let clipZeroStartOffset = PointAudioSyncMapper.clipStartOffset(of: clipZeroText, in: spokenText, from: 0) ?? 0
-        let clipZeroEndOffset = clipZeroStartOffset + clipZeroText.trimmingCharacters(in: .whitespacesAndNewlines).count
-
         audioSyncPointingScheduler = Task { @MainActor [weak self] in
             guard let self else { return }
-            var targetIndex = 1
-            while targetIndex < targetCount {
-                if Task.isCancelled { return }
+            // Each clip's located text range on the spoken-text ruler, filled in as the clips
+            // are reported (they arrive in playback order).
+            var locatedClipRanges: [(startOffset: Int, endOffset: Int)] = []
 
-                let spokenPosition = spokenPositionsByTargetIndex[targetIndex]
-                // BLOCKER 2 (residual): route by the NAMED word (the word before the tag), so a
-                // tag in the separator whitespace after clip 0's last word — or at clip 1's
-                // first character — still uses clip 0's alignment/playhead, never clip 1's.
-                // (The streaming speaker emits at most two clips: clip 0 = first sentence,
-                // clip 1 = batched remainder — so "not clip 0" is clip 1.)
-                let namingClipOrdinal = PointAudioSyncMapper.belongsToFirstClip(
-                    spokenPosition: spokenPosition,
-                    firstClipEndOffset: clipZeroEndOffset,
-                    in: spokenText
-                ) ? 0 : 1
-
-                // Wait (bounded) for this point's clip to be reported — clip 1 (the batched
-                // remainder) is spoken only after clip 0 finishes, so its report can arrive
-                // well after the sequence began. This is a DESIRED wait (the buddy dwells on
-                // the prior target until clip 1 begins), not the BLOCKER 3 hang: the speaker
-                // now always reports a clip, so this resolves when the clip actually plays.
-                let clipReport = await self.awaitClipReport(ordinal: namingClipOrdinal, maxWaitPolls: Self.audioSyncClipReportMaxPolls)
-                if Task.isCancelled { return }
-
-                // Locate the naming clip on the SAME spoken-text ruler so we re-base into its
-                // own coordinate (TRAP 2). MINOR: if clip 1's text can't be located (whitespace
-                // normalization mismatch), `clipStartOffset` stays nil and the fire time below
-                // is nil → we DEGRADE this target rather than schedule from a guessed offset.
-                let namingClipStartOffset: Int?
-                if namingClipOrdinal == 0 {
-                    namingClipStartOffset = clipZeroStartOffset
-                } else if let clipOneText = clipReport?.clipText {
-                    namingClipStartOffset = PointAudioSyncMapper.clipStartOffset(of: clipOneText, in: spokenText, from: clipZeroEndOffset)
-                } else {
-                    namingClipStartOffset = nil
+            /// The report + located start of the clip whose text names `spokenPosition`,
+            /// awaiting clips that haven't started yet. nil when a needed clip never arrives.
+            func namingClip(for spokenPosition: Int) async -> (report: SpokenClipReport, startOffset: Int?)? {
+                var ordinal = 0
+                while true {
+                    if Task.isCancelled { return nil }
+                    guard let report = await self.awaitClipReport(ordinal: ordinal, maxWaitPolls: Self.audioSyncClipReportMaxPolls) else { return nil }
+                    if locatedClipRanges.count <= ordinal {
+                        let searchFrom = locatedClipRanges.last?.endOffset ?? 0
+                        let startOffset = PointAudioSyncMapper.clipStartOffset(of: report.clipText, in: spokenText, from: searchFrom)
+                        let trimmedLength = report.clipText.trimmingCharacters(in: .whitespacesAndNewlines).count
+                        // An unlocatable clip still ends the search at the same place it began,
+                        // so later clips keep their relative order; its own targets degrade.
+                        let endOffset = (startOffset ?? searchFrom) + trimmedLength
+                        locatedClipRanges.append((startOffset ?? -1, endOffset))
+                    }
+                    let range = locatedClipRanges[ordinal]
+                    // The named word (the word before the tag) decides the clip: a tag in the
+                    // whitespace after a clip's last word still belongs to that clip.
+                    if PointAudioSyncMapper.belongsToFirstClip(spokenPosition: spokenPosition, firstClipEndOffset: range.endOffset, in: spokenText) {
+                        return (report, range.startOffset >= 0 ? range.startOffset : nil)
+                    }
+                    ordinal += 1
                 }
+            }
 
-                if let clipReport,
+            for targetIndex in 0..<targetCount {
+                if Task.isCancelled { return }
+                let spokenPosition = spokenPositionsByTargetIndex[targetIndex]
+                if let naming = await namingClip(for: spokenPosition),
                    let fireTimeSeconds = PointAudioSyncMapper.fireTimeSeconds(
                        spokenPosition: spokenPosition,
-                       clipStartOffset: namingClipStartOffset,
-                       alignment: clipReport.timing.alignment,
+                       clipStartOffset: naming.startOffset,
+                       alignment: naming.report.timing.alignment,
                        strategy: PointAudioSyncTuning.anchorStrategy,
                        leadSeconds: PointAudioSyncTuning.leadSeconds
                    ) {
-                    // Poll THIS clip's own playhead until it reaches the fire time (word
-                    // start − lead). TRAP 2: the reader is bound to the clip we mapped
-                    // against, so we never wait on a different clip's timeline.
-                    await self.waitForClipPlayhead(
-                        clipReport.timing.playheadSecondsReader,
-                        toReachSeconds: fireTimeSeconds
-                    )
-                } else {
-                    // BLOCKER 3 / MINOR: no per-word timing for this clip (Apple fallback /
-                    // empty alignment / no report) OR the clip couldn't be located on the
-                    // spoken-text ruler. Degrade PROMPTLY to the untimed multi-point walk — a
-                    // fixed dwell for this target — instead of hanging or scheduling from a
-                    // wrong offset.
+                    await self.waitForClipPlayhead(naming.report.timing.playheadSecondsReader, toReachSeconds: fireTimeSeconds)
+                } else if targetIndex > 0 {
+                    // No timing for this clip, or the clip couldn't be located: a fixed dwell
+                    // on the previous target instead of hanging or guessing.
                     await self.sleepUntimedPointingDwell()
                 }
-
                 if Task.isCancelled { return }
-                self.advanceToNextPointingTarget()
-                targetIndex += 1
+                if targetIndex == 0 { beginSequence() } else { self.advanceToNextPointingTarget() }
             }
         }
     }

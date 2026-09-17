@@ -73,8 +73,9 @@ final class StreamingResponseSpeaker {
     /// the non-pointing speak paths and for Kokoro (which produces no alignment).
     private let onClipSpoken: (@MainActor (SpokenClipReport) -> Void)?
 
-    /// How many ElevenLabs clips have been spoken so far, so each report carries the right
-    /// `clipOrdinal` (0 = first sentence, 1 = batched remainder).
+    /// How many clips have been spoken so far, so each report carries the right
+    /// `clipOrdinal` (ElevenLabs: 0 = first sentence, 1 = batched remainder; Kokoro: one
+    /// per sentence, in order).
     private var elevenLabsClipsSpokenCount = 0
 
     /// Serializes utterances: each new utterance awaits the previous one's Task.
@@ -209,8 +210,13 @@ final class StreamingResponseSpeaker {
             // overlaps the acknowledgement instead of waiting behind it.
             do {
                 latencyLog?.ttsRequested(provider: "kokoro")
-                try await kokoroTTSClient.speak(preparedClip: preparedKokoroClip)
+                let clipOrdinal = elevenLabsClipsSpokenCount
+                elevenLabsClipsSpokenCount += 1
+                let clipTiming = try await kokoroTTSClient.speak(preparedClip: preparedKokoroClip)
                 markPlaybackStartedIfNeeded()
+                // Every Kokoro clip reports its (evenly spread) timing so the pointing
+                // scheduler can time the cursor to the sentence being spoken.
+                onClipSpoken?(SpokenClipReport(clipOrdinal: clipOrdinal, clipText: text, timing: clipTiming))
                 await waitForPlaybackToFinish(isPlaying: { [weak self] in self?.kokoroTTSClient.isPlaying ?? false })
                 return
             } catch {

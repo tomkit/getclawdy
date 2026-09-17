@@ -24,7 +24,7 @@ import Foundation
 final class SpokenCueArbiter {
     private let schedule: [AcknowledgementCueSchedule.Step]
     private let renderer: AcknowledgementCueRenderer
-    /// The filler steps (10 s / 20 s), cancelled when the turn ends any way.
+    /// The filler steps (20 s), cancelled when the turn ends any way.
     private var scheduledTasks: [Task<Void, Never>] = []
     /// The acknowledgement step (the 1 s "let me check"), kept when a turn ends WITHOUT a spoken
     /// reply (a research hand-off, a voice answer to a question) — the user still gets

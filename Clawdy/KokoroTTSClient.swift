@@ -132,8 +132,14 @@ final class KokoroTTSClient: NSObject, SpeechTTSProviding {
     }
 
     /// Plays a prepared clip: awaits its synthesis, the cue gate, then starts playback and
-    /// returns (the caller polls `isPlaying` for the end, like the Apple client).
-    func speak(preparedClip: PreparedClip) async throws {
+    /// returns the clip's timing (the caller polls `isPlaying` for the end).
+    ///
+    /// Kokoro reports no word timestamps, so the alignment is the clip's characters spread
+    /// EVENLY over its audio (duration read from the samples). Within one sentence-sized
+    /// clip that is accurate to a few hundred milliseconds — enough for the cursor to
+    /// arrive on an element as it is named, which is what the pointing sync needs.
+    @discardableResult
+    func speak(preparedClip: PreparedClip) async throws -> SpokenClipTiming {
         clipsAwaitingPlayback += 1
         defer {
             clipsAwaitingPlayback -= 1
@@ -144,17 +150,42 @@ final class KokoroTTSClient: NSObject, SpeechTTSProviding {
         await playbackGate?()
         try Task.checkCancellation()
         currentPlayer?.stop()
-        play(wavData)
+        let player = play(wavData)
         spokenTextsForTesting.append(preparedClip.text)
         print("🔊 Kokoro TTS: speaking \(preparedClip.text.count) characters")
+        guard let player else { return .none }
+        let alignment = Self.linearAlignment(for: preparedClip.text, durationSeconds: player.duration)
+        return SpokenClipTiming(
+            alignment: alignment,
+            playheadSecondsReader: { [weak self, weak player] in
+                guard let self, let player, self.currentPlayer === player, player.isPlaying else { return nil }
+                return player.currentTime
+            }
+        )
+    }
+
+    /// Characters spread evenly over the clip's duration (Kokoro has no timestamps).
+    static func linearAlignment(for text: String, durationSeconds: TimeInterval) -> SpeechClipAlignment? {
+        let characters = text.map { String($0) }
+        guard !characters.isEmpty, durationSeconds > 0 else { return nil }
+        let secondsPerCharacter = durationSeconds / Double(characters.count)
+        return SpeechClipAlignment(
+            characters: characters,
+            characterStartTimesSeconds: characters.indices.map { Double($0) * secondsPerCharacter },
+            characterEndTimesSeconds: characters.indices.map { Double($0 + 1) * secondsPerCharacter }
+        )
     }
 
     // MARK: - SpeechTTSProviding
 
     func speakText(_ text: String) async throws {
+        _ = try await speakTextReportingTiming(text)
+    }
+
+    func speakTextReportingTiming(_ text: String) async throws -> SpokenClipTiming {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedText.isEmpty else { return }
-        try await speak(preparedClip: prepareClip(trimmedText))
+        guard !trimmedText.isEmpty else { return .none }
+        return try await speak(preparedClip: prepareClip(trimmedText))
     }
 
     var isPlaying: Bool {
@@ -170,12 +201,14 @@ final class KokoroTTSClient: NSObject, SpeechTTSProviding {
 
     // MARK: - Playback
 
-    private func play(_ wavData: Data) {
-        guard let player = try? AVAudioPlayer(data: wavData) else { return }
+    @discardableResult
+    private func play(_ wavData: Data) -> AVAudioPlayer? {
+        guard let player = try? AVAudioPlayer(data: wavData) else { return nil }
         player.delegate = self
         player.volume = playbackVolume
         currentPlayer = player
         player.play()
+        return player
     }
 }
 

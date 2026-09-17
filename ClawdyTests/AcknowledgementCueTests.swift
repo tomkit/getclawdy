@@ -13,11 +13,11 @@ import AVFoundation
 @testable import Clawdy
 
 struct AcknowledgementCueScheduleTests {
-    @Test func acknowledgementAfterABeatThenFillersNoEarlierThanTenSeconds() {
+    @Test func acknowledgementAfterABeatThenFillersNoEarlierThanTwentySeconds() {
         let schedule = AcknowledgementCueSchedule.default
         #expect(schedule.first?.delaySeconds == 1.0, "a spoken acknowledgement a natural beat after the keys come up, not the instant they do")
         let laterDelays = schedule.dropFirst().map(\.delaySeconds)
-        #expect(laterDelays.min()! >= 10.0, "a filler before ~10s doubles up with the acknowledgement on an ordinary 2–4s answer")
+        #expect(laterDelays.min()! >= 20.0, "a filler before ~20s doubles up with the acknowledgement on an ordinary 2–4s answer")
         #expect(laterDelays == laterDelays.sorted())
         #expect(!AcknowledgementCueSchedule.allPhrases().isEmpty)
     }
@@ -124,7 +124,7 @@ struct SpokenCueSurvivalTests {
         let manager = CompanionManager(loadElevenLabsAPIKeyFromKeychain: { nil }, kokoroTTSClient: makeMutedKokoroTTSClient())
         manager.setSelectedTTSEngineForTesting(.kokoro)
         manager.simulateReleaseThenRequestStartForTesting()
-        #expect(manager.scheduledCueFillerCountForTesting == 3, "the 1 s ack and the 10 s / 20 s fillers are still armed after the request started")
+        #expect(manager.scheduledCueFillerCountForTesting == 2, "the 1 s ack and the 20 s filler are still armed after the request started")
         manager.cancelQuickAnswer()
         #expect(manager.scheduledCueFillerCountForTesting == 0, "a real Stop cancels them")
     }

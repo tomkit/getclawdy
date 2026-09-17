@@ -275,7 +275,7 @@ struct PointAudioSyncTests {
     @Test func oneSentenceElevenLabsResponseWithAlignmentUsesTimedSync() {
         let clipZeroAlignment = alignment(for: "click the run button")
         #expect(PointAudioSyncMapper.shouldUseTimedPointing(
-            providerIsElevenLabs: true,
+            providerHasTiming: true,
             firstClipAlignment: clipZeroAlignment
         ) == true)
     }
@@ -286,29 +286,36 @@ struct PointAudioSyncTests {
     @Test func untimedWalkOnlyWhenTimingTrulyUnavailable() {
         let realAlignment = alignment(for: "click the run button")
         // Apple TTS → untimed, regardless of any alignment.
-        #expect(PointAudioSyncMapper.shouldUseTimedPointing(providerIsElevenLabs: false, firstClipAlignment: realAlignment) == false)
+        #expect(PointAudioSyncMapper.shouldUseTimedPointing(providerHasTiming: false, firstClipAlignment: realAlignment) == false)
         // ElevenLabs but clip 0 produced no alignment → untimed.
-        #expect(PointAudioSyncMapper.shouldUseTimedPointing(providerIsElevenLabs: true, firstClipAlignment: nil) == false)
+        #expect(PointAudioSyncMapper.shouldUseTimedPointing(providerHasTiming: true, firstClipAlignment: nil) == false)
         let emptyAlignment = SpeechClipAlignment(characters: [], characterStartTimesSeconds: [], characterEndTimesSeconds: [])
-        #expect(PointAudioSyncMapper.shouldUseTimedPointing(providerIsElevenLabs: true, firstClipAlignment: emptyAlignment) == false)
+        #expect(PointAudioSyncMapper.shouldUseTimedPointing(providerHasTiming: true, firstClipAlignment: emptyAlignment) == false)
     }
 
     // MARK: - Graceful degradation (no alignment -> untimed sequence)
 
-    /// A provider WITHOUT timing (the built-in Kokoro voice, which uses the protocol
-    /// default) still speaks, but reports NO alignment and NO playhead — the signal
-    /// `CompanionManager` uses to fall back to the untimed, fixed-dwell pointing sequence.
+    /// The built-in voice has no word timestamps, so each clip reports its characters spread
+    /// EVENLY over the clip's measured duration, plus a playhead bound to that clip's player —
+    /// enough for the cursor to land on an element as its sentence is spoken.
     @MainActor
-    @Test func providerWithoutTimingSpeaksButReportsNoAlignmentSoPointingDegrades() async throws {
+    @Test func kokoroClipReportsEvenlySpreadTimingAndItsOwnPlayhead() async throws {
         let kokoro = makeMutedKokoroTTSClient()
-        let timing = try await kokoro.speakTextReportingTiming("point at the run button")
+        let text = "point at the run button"
+        let timing = try await kokoro.speakTextReportingTiming(text)
 
-        // It DID speak (audio still plays)...
-        #expect(kokoro.spokenTextsForTesting == ["point at the run button"])
+        #expect(kokoro.spokenTextsForTesting == [text])
+        let alignment = try #require(timing.alignment)
+        #expect(alignment.characters.count == text.count)
+        #expect(alignment.characterStartTimesSeconds.first == 0)
+        let lastEnd = try #require(alignment.characterEndTimesSeconds.last)
+        #expect(lastEnd > 0.5 && lastEnd < 5, "the clip's real duration: \(lastEnd)s")
+        // Monotonic, evenly spaced.
+        #expect(alignment.characterStartTimesSeconds == alignment.characterStartTimesSeconds.sorted())
+        #expect(timing.playheadSecondsReader?() != nil, "the clip is playing, so its playhead reads")
         kokoro.stopPlayback()
-        // ...but produced no alignment/playhead, so audio-sync is impossible → degrade.
-        #expect(timing.alignment == nil)
-        #expect(timing.playheadSecondsReader == nil)
+        #expect(timing.playheadSecondsReader?() == nil, "once stopped the reader yields nil so a scheduler advances at once")
+
         // The shared "no timing" sentinel is genuinely empty.
         #expect(SpokenClipTiming.none.alignment == nil)
         #expect(SpokenClipTiming.none.playheadSecondsReader == nil)
