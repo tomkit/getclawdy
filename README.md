@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/clawdy-hero.png" width="860" alt="Clawdy, a small red lobster, has broken out of a shattered terminal window and stands beside the mouse cursor on a spreadsheet, pointing at a broken cell and saying: This one. It's pointing at a deleted row." />
+  <img src="assets/clawdy-hero.png" width="860" alt="Clawdy, a small red lobster, bursting out through a jagged hole in a shattered terminal window, next to a spreadsheet with a broken cell." />
 </p>
 
 Clawdy has no AI of its own. It runs on the **Claude Code** or **Codex** you already have installed, so there is nothing new to sign up for and no separate bill. Your voice never leaves your Mac.

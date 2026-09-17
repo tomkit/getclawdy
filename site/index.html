@@ -61,15 +61,17 @@
   .cracks path:nth-child(n+8){ animation-delay: 1.5s; animation-duration: 0.7s; }
   .cracks path:nth-child(10){ animation-delay: 1.62s; }
   @keyframes drawCrack{ to{ stroke-dashoffset: 0; } }
-  .hole, .hole-rim{ opacity:0; animation: fadeIn 0.08s linear forwards; animation-delay: 1.95s; }
+  .hole-cover{ opacity:1; animation: fadeOut 0.08s linear forwards; animation-delay: 1.95s; }
+  .hole-rim{ opacity:0; animation: fadeIn 0.08s linear forwards; animation-delay: 1.95s; }
+  @keyframes fadeOut{ to{ opacity:0; } }
   .shard{ opacity:0; transform-origin:center; animation: shardFly 0.9s cubic-bezier(.2,.7,.3,1) forwards; animation-delay: 1.95s; }
   .shard.s1{ --dx:-60px; --dy:-130px; --r:-140deg; --lx:150px; --ly:194px; }
   .shard.s2{ --dx:50px; --dy:-160px; --r:200deg; --lx:120px; --ly:190px; }
   .shard.s3{ --dx:-20px; --dy:-100px; --r:-90deg; --lx:225px; --ly:194px; }
   .shard.s4{ --dx:100px; --dy:-110px; --r:120deg; --lx:100px; --ly:198px; }
   @keyframes shardFly{ 0%{ opacity:1; transform: translate(0,0) rotate(0); } 45%{ opacity:1; transform: translate(var(--dx),var(--dy)) rotate(var(--r)); } 100%{ opacity:0; transform: translate(var(--lx),var(--ly)) rotate(var(--r)); } }
-  .peek{ opacity:0; transform-origin: 350px 300px; animation: peekUp 0.8s cubic-bezier(.2,.8,.2,1) forwards, peekHop 0.45s cubic-bezier(.4,0,.8,.6) forwards; animation-delay: 1.9s, 3.1s; }
-  @keyframes peekUp{ from{ opacity:0; transform: translateY(70px) scale(0.94); } to{ opacity:1; transform:none; } }
+  .peek{ opacity:0; transform-origin: 325px 330px; animation: peekUp 0.8s cubic-bezier(.2,.9,.2,1.15) forwards, peekHop 0.45s cubic-bezier(.4,0,.8,.6) forwards; animation-delay: 1.95s, 3.1s; }
+  @keyframes peekUp{ from{ opacity:1; transform: translateY(210px); } to{ opacity:1; transform:none; } }
   @keyframes peekHop{ to{ opacity:0; transform: translate(120px,-140px) scale(0.9); } }
   .land{ opacity:0; transform-origin: 940px 380px; animation: landIn 0.7s cubic-bezier(.34,1.4,.64,1) forwards; animation-delay: 3.4s; }
   @keyframes landIn{ from{ opacity:0; transform: translate(-220px,-150px) scale(0.86); } 60%{ opacity:1; } to{ opacity:1; transform:none; } }
@@ -85,8 +87,8 @@
   .beats li{ display:flex; align-items:center; gap:10px; font-size:14px; color:var(--muted); }
   .beats li b{ display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; background:var(--red-soft); color:var(--red-deep); font-size:12px; }
   @media (prefers-reduced-motion: reduce){
-    .eyes, .eyes .lid, .cracks path, .cracks-glow path, .hole, .hole-rim, .shard, .peek, .land, .cursor-arrow, .hero-trail, .hero-bubble, .term-cursor, .clawdy-bubble, .you-bubble .bar{ animation: none !important; }
-    .eyes{ opacity:0; } .cracks path, .cracks-glow path{ stroke-dashoffset:0; } .hole, .hole-rim{ opacity:1; } .shard{ opacity:0; } .peek{ opacity:0; } .land, .cursor-arrow, .hero-bubble{ opacity:1; } .hero-trail{ opacity:0.55; }
+    .eyes, .eyes .lid, .cracks path, .cracks-glow path, .hole-cover, .hole-rim, .shard, .peek, .land, .cursor-arrow, .hero-trail, .hero-bubble, .term-cursor, .clawdy-bubble, .you-bubble .bar{ animation: none !important; }
+    .eyes{ opacity:0; } .cracks path, .cracks-glow path{ stroke-dashoffset:0; } .hole-cover{ opacity:0; } .hole-rim{ opacity:1; } .shard{ opacity:0; } .peek{ opacity:0; } .land, .cursor-arrow, .hero-bubble{ opacity:1; } .hero-trail{ opacity:0.55; }
   }
 
   /* ---------- VALUE PROPS ---------- */
@@ -170,9 +172,13 @@
           <ellipse cx="250" cy="532" rx="172" ry="13" fill="#000" opacity="0.05"/>
           <ellipse cx="800" cy="532" rx="232" ry="15" fill="#000" opacity="0.05"/>
 
-          <!-- beat 1: the terminal, with the lobster's eyes inside -->
+          <!-- beat 1+2: the terminal. Back face → the lobster rises INSIDE it → the FRONT face with the
+               jagged hole cut out (evenodd), so the body is occluded by the broken edge as it climbs out. -->
+          <clipPath id="peek-clip"><rect x="0" y="-120" width="1160" height="420"/><rect x="60" y="300" width="380" height="220"/></clipPath>
+          <g clip-path="url(#peek-clip)"><g class="peek"><image href="mascot-point-right.png" x="175" y="52" width="300" height="277"/></g></g>
           <g transform="translate(60,300)">
-            <rect width="380" height="220" rx="16" fill="#111217"/>
+            <path class="term-front" fill-rule="evenodd" fill="#111217"
+                  d="M16,0 H364 A16,16 0 0 1 380,16 V204 A16,16 0 0 1 364,220 H16 A16,16 0 0 1 0,204 V16 A16,16 0 0 1 16,0 Z M140,0 L168,48 L196,22 L224,66 L250,30 L278,72 L304,34 L330,58 L356,0 Z"/>
             <g class="eyes">
               <circle cx="176" cy="96" r="14" fill="#FFFFFF"/><circle cx="216" cy="96" r="14" fill="#FFFFFF"/>
               <circle cx="180" cy="98" r="6" fill="#15161B"/><circle cx="220" cy="98" r="6" fill="#15161B"/>
@@ -182,7 +188,7 @@
             <text x="24" y="204" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="#6A6E76">$ claude</text>
             <rect class="term-cursor" x="92" y="192" width="9" height="15" fill="#E5392C"/>
             <!-- shatter: a spiderweb of cracks (radial rays + concentric rings) around the burst point on the top edge, clipped to the window -->
-            <clipPath id="term-clip"><rect width="380" height="220" rx="16"/></clipPath>
+            <clipPath id="term-clip"><path clip-rule="evenodd" d="M16,0 H364 A16,16 0 0 1 380,16 V204 A16,16 0 0 1 364,220 H16 A16,16 0 0 1 0,204 V16 A16,16 0 0 1 16,0 Z M140,0 L168,48 L196,22 L224,66 L250,30 L278,72 L304,34 L330,58 L356,0 Z"/></clipPath>
             <g clip-path="url(#term-clip)">
               <g class="cracks-glow" fill="none" stroke="#E5392C" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity="0.25">
                 <path d="M270,0 L305,26 L351,51 L393,113 L469,135"/><path d="M270,0 L288,46 L322,93 L375,154 L413,239"/><path d="M270,0 L276,44 L266,101 L272,159 L287,267"/><path d="M270,0 L257,47 L240,91 L207,164 L171,230"/><path d="M270,0 L235,32 L182,67 L145,101 L56,149"/>
@@ -194,18 +200,16 @@
                 <path d="M443,0 L445,37 L439,75 L437,122 L384,127 L364,163 L329,183 L292,206 L249,203 L206,196 L180,156 L145,138 L121,108 L80,84 L64,44 L96,0" stroke-width="1" opacity="0.7"/>
               </g>
             </g>
-            <path class="hole" d="M200,-6 L214,26 L236,10 L256,40 L276,14 L300,44 L322,18 L340,36 L352,-6 Z" fill="#F7F5F0"/>
-            <path class="hole-rim" d="M200,-6 L214,26 L236,10 L256,40 L276,14 L300,44 L322,18 L340,36 L352,-6" fill="none" stroke="#2A2C33" stroke-width="3" stroke-linejoin="round"/>
+            <path class="hole-cover" d="M140,0 L168,48 L196,22 L224,66 L250,30 L278,72 L304,34 L330,58 L356,0 Z" fill="#111217"/>
+            <path class="hole-rim" d="M140,0 L168,48 L196,22 L224,66 L250,30 L278,72 L304,34 L330,58 L356,0" fill="none" stroke="#2A2C33" stroke-width="3" stroke-linejoin="round"/>
           </g>
-          <!-- shards fly out of the hole, then lie on the desk as debris -->
+          <!-- shards fly out of the hole -->
           <g class="shards" fill="#111217">
             <polygon class="shard s1" points="296,300 316,296 336,300 320,326"/>
             <polygon class="shard s2" points="360,298 382,300 372,330 356,318"/>
             <polygon class="shard s3" points="262,302 284,296 290,320 270,326"/>
             <polygon class="shard s4" points="396,300 414,298 420,322 402,318"/>
           </g>
-          <!-- beat 2: cracks out (the image's cut edge sits on the terminal's top edge, y=300) -->
-          <g class="peek"><image href="mascot-peek.png" x="150" y="40" width="409" height="390"/></g>
 
           <!-- the everyday app: a spreadsheet -->
           <g transform="translate(520,140)">
