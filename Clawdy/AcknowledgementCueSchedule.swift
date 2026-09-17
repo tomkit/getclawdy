@@ -4,53 +4,45 @@
 //
 //  Pure timing policy for the spoken "I heard you / still working" cues that give
 //  instant feedback after push-to-talk release, based on the classic response-time
-//  thresholds (≈0.1s: feels instant; ≈1s: flow kept; ≈10s: attention lost):
+//  thresholds (≈0.1s: feels instant; ≈1s: flow kept; ≈10s: attention lost). Every cue is
+//  VOICE, in the reply's own voice — never a sound effect:
 //
-//    t = 0      an EARCON (a short non-verbal blip) — always, it can't clash with speech
-//    t ≈ 3s     a short filler in the reply's own voice ("hmm, let me look")
-//    t ≈ 8s     a progress line ("still checking")
-//    t ≈ 15s    a longer-wait line ("this one's taking a bit")
+//    t = 0      a micro-acknowledgement ("mm-hm.") — instant, because it's pre-rendered
+//    t ≈ 3s     a short filler ("hmm, let me look.")
+//    t ≈ 8s     a progress line ("still checking.")
+//    t ≈ 15s    a longer-wait line ("this one's taking a bit.")
 //
-//  The verbal fillers deliberately don't start before ~3s: with Sonnet + low effort an
-//  easy answer reaches first audio at ~2–2.5s, and a filler that starts at 1s and runs
-//  ~1s would collide with the answer on most turns (either stuttering through a fade or
-//  delaying the answer). A filler fires only if no reply audio has started; reply audio
-//  always preempts a filler; the turn ending for any reason cancels the rest.
+//  The later fillers don't start before ~3s: with Sonnet + low effort an easy answer
+//  reaches first audio at ~2–2.5s, and a filler that starts at 1s and runs ~1s would
+//  collide with it. A filler fires only while the reply is still silent (and is dropped
+//  the moment the reply's first TEXT arrives, since audio is then <1s away); the turn
+//  ending for any reason cancels the rest.
 //
 
 import Foundation
 
 enum AcknowledgementCueSchedule {
-    enum Cue: Equatable {
-        case earcon
-        case filler(phrases: [String])
-    }
-
     struct Step: Equatable {
         let delaySeconds: TimeInterval
-        let cue: Cue
+        /// A pool; the arbiter picks one at random so repeats don't sound canned.
+        let phrases: [String]
     }
 
-    /// The default schedule. Phrases are pools; the player picks one at random so a
-    /// repeated wait doesn't sound canned.
     static let `default`: [Step] = [
-        Step(delaySeconds: 0, cue: .earcon),
-        Step(delaySeconds: 3.0, cue: .filler(phrases: ["hmm, let me look.", "let me check.", "one sec."])),
-        Step(delaySeconds: 8.0, cue: .filler(phrases: ["still checking.", "still on it.", "almost there."])),
-        Step(delaySeconds: 15.0, cue: .filler(phrases: ["this one's taking a bit.", "still working on it, hang on."]))
+        Step(delaySeconds: 0, phrases: ["mm-hm.", "okay.", "hmm."]),
+        Step(delaySeconds: 3.0, phrases: ["let me look.", "let me check.", "one sec."]),
+        Step(delaySeconds: 8.0, phrases: ["still checking.", "still on it.", "almost there."]),
+        Step(delaySeconds: 15.0, phrases: ["this one's taking a bit.", "still working on it, hang on."])
     ]
 
-    /// Every distinct filler phrase in a schedule (what the renderer pre-renders).
+    /// Every distinct phrase the schedule can speak (what the renderer pre-renders).
     static func allPhrases(in schedule: [Step] = `default`) -> [String] {
-        schedule.flatMap { step -> [String] in
-            if case .filler(let phrases) = step.cue { return phrases }
-            return []
-        }
+        schedule.flatMap(\.phrases)
     }
 
-    /// Whether a step due at `elapsed` should still fire: only while the reply hasn't
-    /// produced audio and the turn is still in flight.
-    static func shouldFire(step: Step, replyAudioHasStarted: Bool, turnHasEnded: Bool) -> Bool {
-        !replyAudioHasStarted && !turnHasEnded
+    /// Whether a step due now should still fire: only while the reply hasn't produced
+    /// TEXT yet (audio follows text within ~1s) and the turn is still in flight.
+    static func shouldFire(step: Step, replyHasBegun: Bool, turnHasEnded: Bool) -> Bool {
+        !replyHasBegun && !turnHasEnded
     }
 }

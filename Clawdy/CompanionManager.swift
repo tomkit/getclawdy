@@ -59,7 +59,13 @@ enum ScreenCaptureOverlapPlan {
 
 @MainActor
 final class CompanionManager: ObservableObject {
-    @Published private(set) var voiceState: CompanionVoiceState = .idle
+    @Published private(set) var voiceState: CompanionVoiceState = .idle {
+        didSet {
+            // Announcements (research start/done/error) wait while the user is recording
+            // or the reply is speaking, and drain once the companion is idle again.
+            spokenCues.setReplyOrRecordingActive(voiceState != .idle)
+        }
+    }
     @Published private(set) var lastTranscript: String?
     @Published private(set) var currentAudioPowerLevel: CGFloat = 0
     @Published private(set) var hasAccessibilityPermission = false
@@ -214,7 +220,7 @@ final class CompanionManager: ObservableObject {
     /// hand-off in the conversation history and settles the voice state; the session
     /// itself runs in its own separate process and reports through its own overlay.
     private func handOffToSkill(_ skill: ClawdySkill, taskDescription: String, transcript: String) {
-        acknowledgementCues.turnEnded()
+        spokenCues.turnEnded()
         stopAllTTS()
         cancelThinkingCue()
         conversationHistory.append((
@@ -268,7 +274,7 @@ final class CompanionManager: ObservableObject {
             resolveUseClaudeCustomizations: { [weak self] in self?.useClaudeCustomizations ?? true },
             // Research audio cues are always on (no user toggle). The player's
             // isMuted defaults to `{ false }`, so passing no closure = always plays.
-            audioCuePlayer: SystemSoundResearchAudioCuePlayer(),
+            audioCuePlayer: SpokenResearchAudioCuePlayer(arbiter: spokenCues),
             testAnchorOriginOffset: researchTestAnchorOriginOffset
         )
         // Route a focused session's voice follow-up reply through THIS manager's TTS
@@ -683,9 +689,10 @@ final class CompanionManager: ObservableObject {
     /// Per-turn latency marks (`log show … category == "latency"`).
     let turnLatencyLog = TurnLatencyLog()
 
-    /// The "I heard you / still working" cues: an earcon the instant the key is released,
-    /// then voice-matched fillers on a schedule until the reply's audio preempts them.
-    private let acknowledgementCues = AcknowledgementCuePlayer()
+    /// The ONE owner of every deterministic spoken cue (push-to-talk acknowledgements and
+    /// research announcements) and the gate reply clips pass through, so no two voice
+    /// outputs ever overlap. No sound effects: every cue is the reply's own voice.
+    private let spokenCues = SpokenCueArbiter()
 
     /// The voice the reply will use this turn, so cues can be rendered/played in it.
     private var currentCueVoice: AcknowledgementCueRenderer.Voice {
@@ -700,7 +707,8 @@ final class CompanionManager: ObservableObject {
     private func renderAcknowledgementCuesForCurrentVoice() {
         let voice = currentCueVoice
         let renderer = AcknowledgementCueRenderer()
-        let phrases = AcknowledgementCueSchedule.allPhrases()
+        let phrases = SpokenCueArbiter.allPhrases
+        spokenCues.setVoice(voice)
         let apiKey: String? = {
             if case .elevenLabs = voice { return loadElevenLabsAPIKeyFromKeychain() }
             return nil
@@ -1385,7 +1393,7 @@ final class CompanionManager: ObservableObject {
         switch transition {
         case .pressed:
             guard !buddyDictationManager.isDictationInProgress else { return }
-            acknowledgementCues.cancel()
+            spokenCues.cancelTurn()
 
             // When everything is granted, fall straight through to recording — no
             // permission request, no onboarding. Only when a permission is genuinely
@@ -1490,7 +1498,8 @@ final class CompanionManager: ObservableObject {
             // leaves the waveform overlay stuck on screen indefinitely.
             ClawdyAnalytics.trackPushToTalkReleased()
             turnLatencyLog.beginTurn()
-            acknowledgementCues.beginTurn(voice: currentCueVoice)
+            spokenCues.setVoice(currentCueVoice)
+            spokenCues.beginTurn()
             pendingKeyboardShortcutStartTask?.cancel()
             pendingKeyboardShortcutStartTask = nil
             buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
@@ -1921,7 +1930,6 @@ final class CompanionManager: ObservableObject {
                     elevenLabsAPIKeyProvider: loadElevenLabsAPIKeyFromKeychain,
                     elevenLabsVoiceID: elevenLabsVoiceID,
                     onPlaybackStarted: { [weak self] in
-                        self?.acknowledgementCues.replyAudioStarted()
                         self?.turnLatencyLog.firstAudio()
                         self?.voiceState = .responding
                         // Audio has begun — the thinking cue is no longer needed.
@@ -1934,6 +1942,7 @@ final class CompanionManager: ObservableObject {
                     }
                 )
                 responseSpeaker.latencyLog = turnLatencyLog
+                responseSpeaker.cueArbiter = spokenCues
                 currentSentenceBuffer = sentenceBuffer
                 currentResponseSpeaker = responseSpeaker
 
@@ -1971,7 +1980,7 @@ final class CompanionManager: ObservableObject {
                     skills: availableSkills
                 ) {
                 case .followUpFocusedSession:
-                    acknowledgementCues.turnEnded()
+                    spokenCues.turnEnded()
                     stopAllTTS()
                     cancelThinkingCue()
                     // Route the user's SPOKEN prompt (not the directive restatement) to the
@@ -2111,7 +2120,7 @@ final class CompanionManager: ObservableObject {
                 // An unexpected error ended the turn. Guaranteed teardown so annotation
                 // mode never wedges when capture, engine, or encoding throws.
                 teardownAnnotationMode()
-                acknowledgementCues.turnEnded()
+                spokenCues.turnEnded()
                 ClawdyAnalytics.trackResponseError(error: error.localizedDescription)
                 print("⚠️ Companion response error: \(error)")
                 speakLocalErrorFallback(for: error)
@@ -2163,6 +2172,8 @@ final class CompanionManager: ObservableObject {
     /// streaming speaker. Called from the engine's onTextChunk on the main actor.
     private func handleStreamedResponseText(_ accumulatedText: String) {
         turnLatencyLog.firstText()
+        // The reply has begun: audio follows within ~1s, so pending fillers are dropped.
+        spokenCues.replyBegan()
         // The answer has begun arriving — hide the visual thinking cue (and stop
         // its countdown) immediately.
         markAnswerOrAudioStartedHidingThinkingCue()
@@ -2214,7 +2225,7 @@ final class CompanionManager: ObservableObject {
     /// queue. Called when the user speaks again so a new utterance never overlaps
     /// the previous one.
     private func stopAllTTS() {
-        acknowledgementCues.cancel()
+        spokenCues.cancelTurn()
         currentResponseSpeaker?.cancel()
         currentResponseSpeaker = nil
         currentSentenceBuffer = nil

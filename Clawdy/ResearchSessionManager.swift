@@ -146,7 +146,7 @@ final class ResearchSessionManager: ObservableObject {
         applicationSupportDirectory: URL = ClaudeResearchEngine.defaultApplicationSupportDirectory(),
         homeDirectoryPath: String = NSHomeDirectory(),
         manifestStore: ResearchManifestStore = .shared,
-        audioCuePlayer: ResearchAudioCuePlayer = SystemSoundResearchAudioCuePlayer(),
+        audioCuePlayer: ResearchAudioCuePlayer = SilentResearchAudioCuePlayer(),
         testAnchorOriginOffset: CGVector = .zero,
         userDefaults: UserDefaults = .standard
     ) {

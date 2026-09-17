@@ -199,7 +199,7 @@ final class ResearchSession {
         applicationSupportDirectory: URL = ClaudeResearchEngine.defaultApplicationSupportDirectory(),
         homeDirectoryPath: String = NSHomeDirectory(),
         manifestStore: ResearchManifestStore = .shared,
-        audioCuePlayer: ResearchAudioCuePlayer = SystemSoundResearchAudioCuePlayer(),
+        audioCuePlayer: ResearchAudioCuePlayer = SilentResearchAudioCuePlayer(),
         testAnchorOriginOffset: CGVector = .zero
     ) {
         self.sessionID = sessionID

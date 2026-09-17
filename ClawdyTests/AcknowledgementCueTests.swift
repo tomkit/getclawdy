@@ -13,23 +13,20 @@ import AVFoundation
 @testable import Clawdy
 
 struct AcknowledgementCueScheduleTests {
-    @Test func earconIsInstantAndFillersStartNoEarlierThanThreeSeconds() {
+    @Test func instantAcknowledgementThenFillersNoEarlierThanThreeSeconds() {
         let schedule = AcknowledgementCueSchedule.default
-        #expect(schedule.first == AcknowledgementCueSchedule.Step(delaySeconds: 0, cue: .earcon))
-        let fillerDelays = schedule.compactMap { step -> TimeInterval? in
-            if case .filler = step.cue { return step.delaySeconds }
-            return nil
-        }
-        #expect(fillerDelays.min()! >= 3.0, "a verbal filler before ~3s would collide with an easy answer's first audio (~2–2.5s)")
-        #expect(fillerDelays == fillerDelays.sorted())
+        #expect(schedule.first?.delaySeconds == 0, "an instant spoken acknowledgement, not a sound effect")
+        let laterDelays = schedule.dropFirst().map(\.delaySeconds)
+        #expect(laterDelays.min()! >= 3.0, "a filler before ~3s would collide with an easy answer's first audio (~2–2.5s)")
+        #expect(laterDelays == laterDelays.sorted())
         #expect(!AcknowledgementCueSchedule.allPhrases().isEmpty)
     }
 
     @Test func fillersFireOnlyWhileTheReplyIsSilentAndTheTurnIsLive() {
-        let step = AcknowledgementCueSchedule.Step(delaySeconds: 3, cue: .filler(phrases: ["hmm"]))
-        #expect(AcknowledgementCueSchedule.shouldFire(step: step, replyAudioHasStarted: false, turnHasEnded: false))
-        #expect(!AcknowledgementCueSchedule.shouldFire(step: step, replyAudioHasStarted: true, turnHasEnded: false))
-        #expect(!AcknowledgementCueSchedule.shouldFire(step: step, replyAudioHasStarted: false, turnHasEnded: true))
+        let step = AcknowledgementCueSchedule.Step(delaySeconds: 3, phrases: ["hmm"])
+        #expect(AcknowledgementCueSchedule.shouldFire(step: step, replyHasBegun: false, turnHasEnded: false))
+        #expect(!AcknowledgementCueSchedule.shouldFire(step: step, replyHasBegun: true, turnHasEnded: false))
+        #expect(!AcknowledgementCueSchedule.shouldFire(step: step, replyHasBegun: false, turnHasEnded: true))
     }
 }
 
@@ -56,21 +53,22 @@ struct AcknowledgementCueRendererTests {
 }
 
 @MainActor
-struct AcknowledgementCuePlayerTests {
-    @Test func replyAudioCancelsPendingFillersAndTurnEndCancelsToo() async throws {
-        let player = AcknowledgementCuePlayer(schedule: [
-            .init(delaySeconds: 0, cue: .earcon),
-            .init(delaySeconds: 0.05, cue: .filler(phrases: ["hmm"])),
-            .init(delaySeconds: 5, cue: .filler(phrases: ["still checking"]))
+struct SpokenCueArbiterTests {
+    @Test func replyTextCancelsPendingFillersAndTurnEndCancelsToo() async throws {
+        let arbiter = SpokenCueArbiter(schedule: [
+            .init(delaySeconds: 0, phrases: ["mm-hm."]),
+            .init(delaySeconds: 0.05, phrases: ["hmm"]),
+            .init(delaySeconds: 5, phrases: ["still checking"])
         ], renderer: AcknowledgementCueRenderer(cacheRootDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("no-cues")))
-        player.beginTurn(voice: .apple(voiceIdentifier: nil))
-        #expect(player.scheduledFillerCountForTesting == 2)
-        player.replyAudioStarted()
-        #expect(player.scheduledFillerCountForTesting == 0, "reply audio drops every pending filler")
-        #expect(!player.isPlayingFillerForTesting)
+        arbiter.setVoice(.apple(voiceIdentifier: nil))
+        arbiter.beginTurn()
+        #expect(arbiter.scheduledFillerCountForTesting == 2)
+        arbiter.replyBegan()
+        #expect(arbiter.scheduledFillerCountForTesting == 0, "the reply's first text drops every pending filler")
+        #expect(!arbiter.isCuePlaying)
 
-        player.beginTurn(voice: .apple(voiceIdentifier: nil))
-        player.turnEnded()
-        #expect(player.scheduledFillerCountForTesting == 0, "a routed/failed turn drops them too")
+        arbiter.beginTurn()
+        arbiter.turnEnded()
+        #expect(arbiter.scheduledFillerCountForTesting == 0, "a routed/failed turn drops them too")
     }
 }

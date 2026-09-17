@@ -66,6 +66,9 @@ final class StreamingResponseSpeaker {
     private let onPlaybackStarted: @MainActor () -> Void
     /// Optional per-turn latency marks (set by the manager for the turn in flight).
     var latencyLog: TurnLatencyLog?
+    /// The spoken-cue arbiter: each clip waits until no cue is playing, so the reply never
+    /// talks over an acknowledgement (cues are ≤ ~1s; usually there's nothing to wait for).
+    var cueArbiter: SpokenCueArbiter?
 
     /// Called each time an ElevenLabs clip's audio STARTS, carrying that clip's timing so
     /// the manager can schedule audio-synced cursor advances against it. nil (default) for
@@ -197,6 +200,7 @@ final class StreamingResponseSpeaker {
     }
 
     private func speakOneUtterance(_ text: String, preferElevenLabs: Bool) async {
+        await cueArbiter?.waitUntilNoCueIsPlaying()
         // Reserve this clip's ordinal UP FRONT when it is an ElevenLabs-intended clip, so the
         // report carries the right ordinal (0 = first sentence, 1 = batched remainder) whether
         // we get real timing OR fall back to Apple. BLOCKER 3: the manager's audio-sync

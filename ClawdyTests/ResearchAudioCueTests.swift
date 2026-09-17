@@ -13,7 +13,7 @@
 //   1. REAL-PATH transition tests drive the actual `ResearchCoordinator` against a
 //      fake `claude` binary with a recording cue player injected in place of real
 //      audio, and assert the exact cue sequence.
-//   2. Pure tests on `SystemSoundResearchAudioCuePlayer` cover the cue → named
+//   2. Pure tests on `SpokenResearchAudioCuePlayer` cover the cue → spoken-line
 //      system-sound mapping and the mute gate, using an injected sound sink so no
 //      audio ever plays.
 //
@@ -215,32 +215,24 @@ struct ResearchAudioCueTransitionTests {
     }
 }
 
-// MARK: - Real player: sound mapping + mute gate (no real audio)
+// MARK: - Real player: spoken lines, never sound effects
 
-struct SystemSoundResearchAudioCuePlayerTests {
-
-    @Test func eachCueMapsToADistinctSubtleSystemSound() {
-        #expect(SystemSoundResearchAudioCuePlayer.systemSoundName(for: .acknowledge) == "Tink")
-        #expect(SystemSoundResearchAudioCuePlayer.systemSoundName(for: .done) == "Glass")
-        #expect(SystemSoundResearchAudioCuePlayer.systemSoundName(for: .error) == "Basso")
-
-        let distinctNames = Set([
-            SystemSoundResearchAudioCuePlayer.systemSoundName(for: .acknowledge),
-            SystemSoundResearchAudioCuePlayer.systemSoundName(for: .done),
-            SystemSoundResearchAudioCuePlayer.systemSoundName(for: .error)
-        ])
-        #expect(distinctNames.count == 3, "the three cues must use three distinct sounds")
+struct SpokenResearchAudioCuePlayerTests {
+    @Test func eachCueIsADistinctSpokenLine() {
+        let lines = [ResearchAudioCue.acknowledge, .done, .error].map(ResearchSpokenCue.phrase(for:))
+        #expect(Set(lines).count == 3)
+        #expect(ResearchSpokenCue.phrase(for: .done) == "your page is ready.")
+        #expect(SpokenCueArbiter.allPhrases.contains(ResearchSpokenCue.phrase(for: .error)), "announcements are pre-rendered with the fillers")
     }
 
-    @Test func unmutedPlayerRoutesEachCueToItsMappedSound() {
-        var playedSoundNames: [String] = []
-        let player = SystemSoundResearchAudioCuePlayer(
-            isMuted: { false },
-            playNamedSystemSound: { playedSoundNames.append($0) }
-        )
-        player.play(.acknowledge)
+    @MainActor @Test func announcementsWaitWhileTheReplyIsActive() {
+        let arbiter = SpokenCueArbiter(renderer: AcknowledgementCueRenderer(cacheRootDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("no-cues")))
+        arbiter.setVoice(.apple(voiceIdentifier: nil))
+        let player = SpokenResearchAudioCuePlayer(arbiter: arbiter)
+        arbiter.setReplyOrRecordingActive(true)
         player.play(.done)
-        player.play(.error)
-        #expect(playedSoundNames == ["Tink", "Glass", "Basso"])
+        #expect(arbiter.queuedAnnouncementCountForTesting == 1, "a cue never plays over the reply")
+        arbiter.setReplyOrRecordingActive(false)
+        #expect(arbiter.queuedAnnouncementCountForTesting == 0, "it drains once the companion is idle")
     }
 }
