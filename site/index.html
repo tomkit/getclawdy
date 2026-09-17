@@ -56,9 +56,18 @@
   .eyes .lid{ animation: blink 2.4s steps(1) infinite; }
   @keyframes blink{ 0%,88%{ opacity:0; } 89%,100%{ opacity:1; } }
   @keyframes eyesOut{ to{ opacity:0; } }
-  .crack, .crack-glow{ stroke-dasharray: 520; stroke-dashoffset: 520; animation: drawCrack 0.8s cubic-bezier(.2,.8,.2,1) forwards; animation-delay: 1.3s; }
-  .crack-glow{ animation-delay: 1.34s; }
+  .cracks path, .cracks-glow path{ stroke-dasharray: 700; stroke-dashoffset: 700; animation: drawCrack 0.5s cubic-bezier(.2,.8,.2,1) forwards; animation-delay: 1.3s; }
+  .cracks path:nth-child(even), .cracks-glow path:nth-child(even){ animation-delay: 1.38s; }
+  .cracks path:nth-child(n+8){ animation-delay: 1.5s; animation-duration: 0.7s; }
+  .cracks path:nth-child(10){ animation-delay: 1.62s; }
   @keyframes drawCrack{ to{ stroke-dashoffset: 0; } }
+  .hole, .hole-rim{ opacity:0; animation: fadeIn 0.08s linear forwards; animation-delay: 1.95s; }
+  .shard{ opacity:0; transform-origin:center; animation: shardFly 0.9s cubic-bezier(.2,.7,.3,1) forwards; animation-delay: 1.95s; }
+  .shard.s1{ --dx:-60px; --dy:-130px; --r:-140deg; --lx:150px; --ly:194px; }
+  .shard.s2{ --dx:50px; --dy:-160px; --r:200deg; --lx:120px; --ly:190px; }
+  .shard.s3{ --dx:-20px; --dy:-100px; --r:-90deg; --lx:225px; --ly:194px; }
+  .shard.s4{ --dx:100px; --dy:-110px; --r:120deg; --lx:100px; --ly:198px; }
+  @keyframes shardFly{ 0%{ opacity:1; transform: translate(0,0) rotate(0); } 45%{ opacity:1; transform: translate(var(--dx),var(--dy)) rotate(var(--r)); } 100%{ opacity:0; transform: translate(var(--lx),var(--ly)) rotate(var(--r)); } }
   .peek{ opacity:0; transform-origin: 350px 300px; animation: peekUp 0.8s cubic-bezier(.2,.8,.2,1) forwards, peekHop 0.45s cubic-bezier(.4,0,.8,.6) forwards; animation-delay: 1.9s, 3.1s; }
   @keyframes peekUp{ from{ opacity:0; transform: translateY(70px) scale(0.94); } to{ opacity:1; transform:none; } }
   @keyframes peekHop{ to{ opacity:0; transform: translate(120px,-140px) scale(0.9); } }
@@ -76,8 +85,8 @@
   .beats li{ display:flex; align-items:center; gap:10px; font-size:14px; color:var(--muted); }
   .beats li b{ display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; background:var(--red-soft); color:var(--red-deep); font-size:12px; }
   @media (prefers-reduced-motion: reduce){
-    .eyes, .eyes .lid, .crack, .crack-glow, .peek, .land, .cursor-arrow, .hero-trail, .hero-bubble, .term-cursor, .clawdy-bubble, .you-bubble .bar{ animation: none !important; }
-    .eyes{ opacity:0; } .crack, .crack-glow{ stroke-dashoffset:0; } .peek{ opacity:0; } .land, .cursor-arrow, .hero-bubble{ opacity:1; } .hero-trail{ opacity:0.55; }
+    .eyes, .eyes .lid, .cracks path, .cracks-glow path, .hole, .hole-rim, .shard, .peek, .land, .cursor-arrow, .hero-trail, .hero-bubble, .term-cursor, .clawdy-bubble, .you-bubble .bar{ animation: none !important; }
+    .eyes{ opacity:0; } .cracks path, .cracks-glow path{ stroke-dashoffset:0; } .hole, .hole-rim{ opacity:1; } .shard{ opacity:0; } .peek{ opacity:0; } .land, .cursor-arrow, .hero-bubble{ opacity:1; } .hero-trail{ opacity:0.55; }
   }
 
   /* ---------- MOMENTS ---------- */
@@ -92,19 +101,21 @@
   .moment-copy{ display:flex; flex-direction:column; gap:16px; }
   .you{ font-size:12.5px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); font-weight:600; margin:0; }
 
-  /* the user's spoken line: a light speech bubble with a mic + live waveform; its tail points down-left, toward "you" */
-  .you-bubble{ position:relative; background:var(--card); border:1.5px solid var(--line); border-radius:22px 22px 22px 6px; padding: 18px 22px 18px 20px; display:flex; gap:14px; align-items:flex-start; }
-  .you-bubble .mic{ flex:none; width:40px; height:40px; border-radius:50%; background:var(--red-soft); display:grid; place-items:center; margin-top:2px; }
+  /* the user's spoken line: a tinted, borderless speech bubble (nothing like the white UI windows in the scenes),
+     with a drawn tail at the bottom-left and the mic badge hanging off that corner like an avatar */
+  .you-bubble{ position:relative; background:#EFE8DA; border-radius:28px; padding: 22px 26px 22px 28px; margin: 0 0 22px 14px; }
+  .you-bubble::after{ content:""; position:absolute; left:26px; bottom:-14px; width:0; height:0; border-left:16px solid #EFE8DA; border-bottom:16px solid transparent; transform: skewX(-18deg); }
+  .you-bubble .mic{ position:absolute; left:-14px; bottom:-20px; width:44px; height:44px; border-radius:50%; background:var(--red); box-shadow: 0 0 0 4px var(--bg); display:grid; place-items:center; }
   .you-bubble .mic svg{ width:20px; height:20px; display:block; }
   .you-bubble .said{ font-size: clamp(26px,3.2vw,40px); line-height:1.08; letter-spacing:-0.03em; font-weight:700; margin:0; text-wrap:balance; }
-  .you-bubble .wave{ display:flex; gap:3px; align-items:center; height:14px; margin-top:10px; }
+  .you-bubble .wave{ display:flex; gap:3px; align-items:center; height:14px; margin-top:12px; margin-left:2px; }
   .you-bubble .bar{ display:block; width:3px; border-radius:2px; background:var(--red); height:6px; animation: wave 1.1s ease-in-out infinite; }
   .you-bubble .bar:nth-child(2){ animation-delay:.15s; } .you-bubble .bar:nth-child(3){ animation-delay:.3s; } .you-bubble .bar:nth-child(4){ animation-delay:.45s; } .you-bubble .bar:nth-child(5){ animation-delay:.6s; }
   @keyframes wave{ 0%,100%{ height:5px; } 50%{ height:14px; } }
   .then{ font-size:17px; line-height:1.55; color:var(--muted); margin:0; max-width:42ch; }
   .then b{ color:var(--ink); font-weight:600; }
   .moment-art{ min-width:0; }
-  .clawdy-bubble{ animation: bubblePop 0.55s cubic-bezier(.34,1.56,.64,1) both; animation-delay: .4s; }
+  .clawdy-bubble:not(.hero-bubble){ animation: bubblePop 0.55s cubic-bezier(.34,1.56,.64,1) both; animation-delay: .4s; }
 
   /* ---------- FOOT ---------- */
   .foot{ text-align:center; padding: 72px clamp(20px,6vw,64px) 56px; border-top:1px solid var(--line); }
@@ -156,13 +167,32 @@
               <circle cx="180" cy="98" r="6" fill="#15161B"/><circle cx="220" cy="98" r="6" fill="#15161B"/>
               <rect class="lid" x="160" y="80" width="72" height="16" fill="#111217"/>
             </g>
-            <path class="crack-glow" d="M20,50 L55,20 L90,55 L130,15 L175,50 L215,18 L255,52 L300,22 L340,48 L360,32" fill="none" stroke="#E5392C" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity="0.28"/>
-            <path class="crack" d="M20,50 L55,20 L90,55 L130,15 L175,50 L215,18 L255,52 L300,22 L340,48 L360,32" fill="none" stroke="#F7F5F0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-            <g stroke="#2A2C33" stroke-width="3" stroke-linecap="round"><line x1="24" y1="140" x2="120" y2="140"/><line x1="24" y1="166" x2="200" y2="166"/></g>
-            <text x="24" y="196" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="#6A6E76">$ claude</text>
-            <rect class="term-cursor" x="92" y="184" width="9" height="15" fill="#E5392C"/>
+            <g stroke="#2A2C33" stroke-width="3" stroke-linecap="round"><line x1="24" y1="150" x2="120" y2="150"/><line x1="24" y1="174" x2="200" y2="174"/></g>
+            <text x="24" y="204" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="#6A6E76">$ claude</text>
+            <rect class="term-cursor" x="92" y="192" width="9" height="15" fill="#E5392C"/>
+            <!-- shatter: a spiderweb of cracks (radial rays + concentric rings) around the burst point on the top edge, clipped to the window -->
+            <clipPath id="term-clip"><rect width="380" height="220" rx="16"/></clipPath>
+            <g clip-path="url(#term-clip)">
+              <g class="cracks-glow" fill="none" stroke="#E5392C" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity="0.25">
+                <path d="M270,0 L305,26 L351,51 L393,113 L469,135"/><path d="M270,0 L288,46 L322,93 L375,154 L413,239"/><path d="M270,0 L276,44 L266,101 L272,159 L287,267"/><path d="M270,0 L257,47 L240,91 L207,164 L171,230"/><path d="M270,0 L235,32 L182,67 L145,101 L56,149"/>
+              </g>
+              <g class="cracks" fill="none" stroke="#E9E4DA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M270,0 L316,6 L378,12 L439,30 L502,50"/><path d="M270,0 L305,26 L351,51 L393,113 L469,135"/><path d="M270,0 L288,46 L322,93 L375,154 L413,239"/><path d="M270,0 L276,44 L266,101 L272,159 L287,267"/><path d="M270,0 L257,47 L240,91 L207,164 L171,230"/><path d="M270,0 L235,32 L182,67 L145,101 L56,149"/><path d="M270,0 L222,15 L161,38 L106,30 L35,59"/>
+                <path d="M319,0 L329,15 L326,29 L314,39 L307,53 L289,51 L277,61 L263,59 L249,56 L238,47 L222,43 L211,31 L214,14 L209,0" stroke-width="1.4"/>
+                <path d="M371,0 L392,30 L379,57 L372,91 L344,107 L309,103 L284,113 L255,123 L235,93 L204,96 L191,70 L178,48 L172,24 L142,0" stroke-width="1.2"/>
+                <path d="M443,0 L445,37 L439,75 L437,122 L384,127 L364,163 L329,183 L292,206 L249,203 L206,196 L180,156 L145,138 L121,108 L80,84 L64,44 L96,0" stroke-width="1" opacity="0.7"/>
+              </g>
+            </g>
+            <path class="hole" d="M200,-6 L214,26 L236,10 L256,40 L276,14 L300,44 L322,18 L340,36 L352,-6 Z" fill="#F7F5F0"/>
+            <path class="hole-rim" d="M200,-6 L214,26 L236,10 L256,40 L276,14 L300,44 L322,18 L340,36 L352,-6" fill="none" stroke="#2A2C33" stroke-width="3" stroke-linejoin="round"/>
           </g>
-
+          <!-- shards fly out of the hole, then lie on the desk as debris -->
+          <g class="shards" fill="#111217">
+            <polygon class="shard s1" points="296,300 316,296 336,300 320,326"/>
+            <polygon class="shard s2" points="360,298 382,300 372,330 356,318"/>
+            <polygon class="shard s3" points="262,302 284,296 290,320 270,326"/>
+            <polygon class="shard s4" points="396,300 414,298 420,322 402,318"/>
+          </g>
           <!-- beat 2: cracks out (the image's cut edge sits on the terminal's top edge, y=300) -->
           <g class="peek"><image href="mascot-peek.png" x="150" y="40" width="409" height="390"/></g>
 
@@ -213,7 +243,7 @@
       <article class="moment">
         <div class="moment-copy">
           <p class="you">You say, at 11:40pm</p>
-          <div class="you-bubble"><span class="mic" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="#B8281D" stroke-width="1.8" stroke-linecap="round"><rect x="7" y="2" width="6" height="10" rx="3" fill="#B8281D" stroke="none"/><path d="M4.5,9.5 a5.5,5.5 0 0 0 11,0"/><path d="M10,15 v3"/><path d="M7,18 h6"/></svg></span><div><h3 class="said">&ldquo;What did I just break?&rdquo;</h3><span class="wave" aria-hidden="true"><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i></span></div></div>
+          <div class="you-bubble"><h3 class="said">&ldquo;What did I just break?&rdquo;</h3><span class="wave" aria-hidden="true"><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i></span><span class="mic" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"><rect x="7" y="2" width="6" height="10" rx="3" fill="#FFFFFF" stroke="none"/><path d="M4.5,9.5 a5.5,5.5 0 0 0 11,0"/><path d="M10,15 v3"/><path d="M7,18 h6"/></svg></span></div>
           <p class="then">Clawdy reads the dialog you've been staring at. <b>"Nothing's lost. Click Revert to Saved, that one."</b> The claw is already on it.</p>
         </div>
         <div class="moment-art">
@@ -242,7 +272,7 @@
       <article class="moment">
         <div class="moment-copy">
           <p class="you">You say, in System Settings</p>
-          <div class="you-bubble"><span class="mic" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="#B8281D" stroke-width="1.8" stroke-linecap="round"><rect x="7" y="2" width="6" height="10" rx="3" fill="#B8281D" stroke="none"/><path d="M4.5,9.5 a5.5,5.5 0 0 0 11,0"/><path d="M10,15 v3"/><path d="M7,18 h6"/></svg></span><div><h3 class="said">&ldquo;Which of these do I actually need on?&rdquo;</h3><span class="wave" aria-hidden="true"><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i></span></div></div>
+          <div class="you-bubble"><h3 class="said">&ldquo;Which of these do I actually need on?&rdquo;</h3><span class="wave" aria-hidden="true"><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i></span><span class="mic" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"><rect x="7" y="2" width="6" height="10" rx="3" fill="#FFFFFF" stroke="none"/><path d="M4.5,9.5 a5.5,5.5 0 0 0 11,0"/><path d="M10,15 v3"/><path d="M7,18 h6"/></svg></span></div>
           <p class="then">Twelve toggles, zero explanation. Clawdy circles one. <b>"Just this one. Leave the rest off."</b></p>
         </div>
         <div class="moment-art">
@@ -268,7 +298,7 @@
       <article class="moment">
         <div class="moment-copy">
           <p class="you">You say, on a government website</p>
-          <div class="you-bubble"><span class="mic" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="#B8281D" stroke-width="1.8" stroke-linecap="round"><rect x="7" y="2" width="6" height="10" rx="3" fill="#B8281D" stroke="none"/><path d="M4.5,9.5 a5.5,5.5 0 0 0 11,0"/><path d="M10,15 v3"/><path d="M7,18 h6"/></svg></span><div><h3 class="said">&ldquo;I have no idea what this box wants.&rdquo;</h3><span class="wave" aria-hidden="true"><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i></span></div></div>
+          <div class="you-bubble"><h3 class="said">&ldquo;I have no idea what this box wants.&rdquo;</h3><span class="wave" aria-hidden="true"><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i></span><span class="mic" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"><rect x="7" y="2" width="6" height="10" rx="3" fill="#FFFFFF" stroke="none"/><path d="M4.5,9.5 a5.5,5.5 0 0 0 11,0"/><path d="M10,15 v3"/><path d="M7,18 h6"/></svg></span></div>
           <p class="then">Clawdy reads the whole form, not just the box. <b>"That's your adjusted gross income. It's line 11 on last year's return."</b></p>
         </div>
         <div class="moment-art">
@@ -302,7 +332,7 @@
       <article class="moment">
         <div class="moment-copy">
           <p class="you">You say, six paragraphs deep</p>
-          <div class="you-bubble"><span class="mic" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="#B8281D" stroke-width="1.8" stroke-linecap="round"><rect x="7" y="2" width="6" height="10" rx="3" fill="#B8281D" stroke="none"/><path d="M4.5,9.5 a5.5,5.5 0 0 0 11,0"/><path d="M10,15 v3"/><path d="M7,18 h6"/></svg></span><div><h3 class="said">&ldquo;What do they actually want from me?&rdquo;</h3><span class="wave" aria-hidden="true"><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i></span></div></div>
+          <div class="you-bubble"><h3 class="said">&ldquo;What do they actually want from me?&rdquo;</h3><span class="wave" aria-hidden="true"><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i></span><span class="mic" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"><rect x="7" y="2" width="6" height="10" rx="3" fill="#FFFFFF" stroke="none"/><path d="M4.5,9.5 a5.5,5.5 0 0 0 11,0"/><path d="M10,15 v3"/><path d="M7,18 h6"/></svg></span></div>
           <p class="then">Clawdy skips the pleasantries and highlights one sentence. <b>"The invoice, by Friday. Everything else is padding."</b></p>
         </div>
         <div class="moment-art">
@@ -330,7 +360,7 @@
       <article class="moment">
         <div class="moment-copy">
           <p class="you">You say, with 14 tabs open</p>
-          <div class="you-bubble"><span class="mic" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="#B8281D" stroke-width="1.8" stroke-linecap="round"><rect x="7" y="2" width="6" height="10" rx="3" fill="#B8281D" stroke="none"/><path d="M4.5,9.5 a5.5,5.5 0 0 0 11,0"/><path d="M10,15 v3"/><path d="M7,18 h6"/></svg></span><div><h3 class="said">&ldquo;Find me three laptops under $900 and put it on one page.&rdquo;</h3><span class="wave" aria-hidden="true"><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i></span></div></div>
+          <div class="you-bubble"><h3 class="said">&ldquo;Find me three laptops under $900 and put it on one page.&rdquo;</h3><span class="wave" aria-hidden="true"><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i></span><span class="mic" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"><rect x="7" y="2" width="6" height="10" rx="3" fill="#FFFFFF" stroke="none"/><path d="M4.5,9.5 a5.5,5.5 0 0 0 11,0"/><path d="M10,15 v3"/><path d="M7,18 h6"/></svg></span></div>
           <p class="then">Big ask, so Clawdy goes and does it: reads the web, builds the comparison with pictures and prices, opens it on your screen. <b>"Done. The middle one, if you want my pick."</b></p>
         </div>
         <div class="moment-art">
