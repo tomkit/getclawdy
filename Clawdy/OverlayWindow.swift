@@ -9,6 +9,7 @@
 
 import AppKit
 import SwiftUI
+import os
 
 /// The single, central place to tune how many places the blue cursor points at in
 /// one reply and how long it lingers on each. Grouped so the feel can be adjusted
@@ -669,8 +670,13 @@ struct BlueCursorView: View {
         buddyNavigationMode = .navigatingToTarget
         isReturningToCursor = false
 
+        TurnLatencyLog.pointingLogger.notice("fly to index \(companionManager.currentPointingTargetIndex ?? -1): screen(\(Int(screenLocation.x)),\(Int(screenLocation.y))) → overlay(\(Int(clampedTarget.x)),\(Int(clampedTarget.y))) on \(Int(screenFrame.width))x\(Int(screenFrame.height))")
         animateBezierFlightArc(to: clampedTarget) {
-            guard self.buddyNavigationMode == .navigatingToTarget else { return }
+            guard self.buddyNavigationMode == .navigatingToTarget else {
+                TurnLatencyLog.pointingLogger.notice("flight ended but mode is no longer navigating — landing skipped")
+                return
+            }
+            TurnLatencyLog.pointingLogger.notice("landed at index \(self.companionManager.currentPointingTargetIndex ?? -1)")
             self.startPointingAtElement()
         }
     }
@@ -904,6 +910,7 @@ struct BlueCursorView: View {
 
     /// Flies the buddy back to the current cursor position after pointing is done.
     private func startFlyingBackToCursor() {
+        TurnLatencyLog.pointingLogger.notice("return to cursor")
         let mouseLocation = NSEvent.mouseLocation
         let cursorInSwiftUI = convertScreenPointToSwiftUICoordinates(mouseLocation)
         let cursorWithTrackingOffset = CGPoint(x: cursorInSwiftUI.x + 35, y: cursorInSwiftUI.y + 25)

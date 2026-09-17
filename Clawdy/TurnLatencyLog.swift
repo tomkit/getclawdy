@@ -26,6 +26,10 @@ import os
 @MainActor
 final class TurnLatencyLog {
     static let logger = Logger(subsystem: "com.clawdy.Clawdy", category: "latency")
+    /// The pointing walk, step by step (sequence start, each flight, landing, advance,
+    /// return), so "it only moved once" can be read off the log:
+    /// `log show --predicate 'subsystem == "com.clawdy.Clawdy" AND category == "pointing"' --last 10m`
+    static let pointingLogger = Logger(subsystem: "com.clawdy.Clawdy", category: "pointing")
 
     private var turnStart: Date?
     private var hasLoggedFirstText = false

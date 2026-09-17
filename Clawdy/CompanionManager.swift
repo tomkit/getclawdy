@@ -12,6 +12,7 @@ import ClawdyVoice
 import Combine
 import CoreGraphics
 import Foundation
+import os
 import PostHog
 import ScreenCaptureKit
 import SwiftUI
@@ -1007,6 +1008,7 @@ final class CompanionManager: ObservableObject {
     }
 
     func clearDetectedElementLocation() {
+        if currentPointingTargetIndex != nil { TurnLatencyLog.pointingLogger.notice("sequence cleared at index \(self.currentPointingTargetIndex ?? -1)") }
         detectedElementTargets = []
         currentPointingTargetIndex = nil
         detectedElementBubbleText = nil
@@ -1027,6 +1029,7 @@ final class CompanionManager: ObservableObject {
 
         let wasAlreadyPointing = currentPointingTargetIndex != nil
         detectedElementTargets = targets
+        TurnLatencyLog.pointingLogger.notice("sequence begin: \(targets.count) target(s) \(targets.map { "\($0.elementLabel ?? "?")@(\(Int($0.screenLocation.x)),\(Int($0.screenLocation.y)))" }.joined(separator: " "), privacy: .public) restart=\(wasAlreadyPointing)")
 
         if wasAlreadyPointing {
             // A sequence is already running. Reset the index to nil first so the
@@ -1060,6 +1063,7 @@ final class CompanionManager: ObservableObject {
         guard let currentIndex = currentPointingTargetIndex else { return }
         let nextIndex = currentIndex + 1
         guard detectedElementTargets.indices.contains(nextIndex) else { return }
+        TurnLatencyLog.pointingLogger.notice("advance \(currentIndex) → \(nextIndex)")
         currentPointingTargetIndex = nextIndex
     }
 
@@ -2126,6 +2130,25 @@ final class CompanionManager: ObservableObject {
                     return (target, parsedPoint.spokenPosition)
                 }
                 let pointingTargets = pointingTargetsWithSpokenPositions.map(\.target)
+
+                // Evidence for "the claw landed in the wrong place": the exact images the
+                // model saw, its reply, and every point through each coordinate space.
+                TurnDebugDump.write(
+                    screenCaptures: screenCaptures,
+                    userText: effectiveUserPrompt,
+                    replyText: fullResponseText,
+                    points: zip(parseResult.points, pointingTargetsWithSpokenPositions).map { parsedPoint, mapped in
+                        let capture = screenCaptures.first { $0.displayFrame == mapped.target.displayFrame }
+                        return TurnDebugDump.PointRecord(
+                            label: parsedPoint.elementLabel,
+                            screenNumber: parsedPoint.screenNumber,
+                            screenshotPixel: [parsedPoint.coordinate.x, parsedPoint.coordinate.y],
+                            screenshotSize: [capture?.screenshotWidthInPixels ?? 0, capture?.screenshotHeightInPixels ?? 0],
+                            displayPoints: [capture?.displayWidthInPoints ?? 0, capture?.displayHeightInPoints ?? 0],
+                            globalScreenLocation: [mapped.target.screenLocation.x, mapped.target.screenLocation.y]
+                        )
+                    }
+                )
 
                 // Finalize streaming TTS FIRST (BLOCKER 1): speak whatever sentence(s) hadn't
                 // yet been spoken from the authoritative final text (point tag stripped). This
