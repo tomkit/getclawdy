@@ -35,7 +35,8 @@ You need an Apple Developer Program membership (team `M2U28D32J3`) and:
    ```
    It archives, exports a Developer ID-signed `Clawdy.app`, wraps it in a DMG, submits the
    DMG to Apple for notarization, staples the ticket, generates `SHA256SUMS`, creates the
-   `v0.0.1` git tag, and publishes a GitHub Release with the DMG + checksums + changelog notes.
+   `v0.0.1` git tag, publishes a GitHub Release with the DMG + checksums + changelog notes,
+   and adds the new version's SHA-256 to the release table in `README.md` (committed + pushed).
 3. Verify the published release page, then announce.
 
 ## What makes the download trustworthy

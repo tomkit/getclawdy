@@ -71,7 +71,7 @@ Because it's your real CLI, your setup comes with it: CLAUDE.md, skills, plugins
 
 Clawdy is a lead agent. It can answer simple questions on its own and will respond quickly. For bigger questions, it will route to a subagent or trigger a plugin (mcp, skill, tool) to help it answer the question.
 
-The routing prompt is a file you can edit: `~/.clawdy/router.md`.
+The prompt that makes that call is a file you can edit: `~/.clawdy/router.md`. Clawdy writes it on first launch and reads it before every question, so changes apply right away. Keep the `{{clawdy_skills}}` and `{{harness_skills}}` placeholders; that's where the skill list goes.
 
 ## Skills
 
@@ -117,11 +117,21 @@ xcodebuild test -project Clawdy.xcodeproj -scheme Clawdy -destination 'platform=
 
 Build from Xcode for day-to-day work. Terminal `xcodebuild` runs can reset the permissions above.
 
-To check a downloaded release: each one ships a `SHA256SUMS`. The DMG is signed with a Developer ID and notarized by Apple.
+## Releases
+
+Every DMG is signed with a Developer ID and notarized by Apple. To check a download, compare its SHA-256 with the table (or the `SHA256SUMS` file attached to the release):
 
 ```bash
-shasum -a 256 -c SHA256SUMS
+shasum -a 256 Clawdy.dmg
 ```
+
+| Version | Date | SHA-256 of `Clawdy.dmg` |
+|---|---|---|
+| [0.0.3](https://github.com/tomkit/getclawdy/releases/tag/v0.0.3) (latest) | 2026-09-17 | `157abd35d6f2d64f2c1ef962b5ee10958d570c3e1b1997badb183eb502d252e8` |
+| [0.0.2](https://github.com/tomkit/getclawdy/releases/tag/v0.0.2) | 2026-07-10 | `051567a69fe3d0409617e54eb90ca6132f8352052e780effbf51aca19d145804` |
+| [0.0.1](https://github.com/tomkit/getclawdy/releases/tag/v0.0.1) | 2026-07-10 | `0e908a1da69528d25e93ae66b8a615480ac9e9fe51d8a778464c2ade0aaf1ae3` |
+
+What changed in each is in the [changelog](CHANGELOG.md).
 
 ## Credits and license
 
