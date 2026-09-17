@@ -763,24 +763,7 @@ struct CompanionPanelView: View {
     /// the warm process, so the next question uses it.
     private var quickAnswerSpeedRows: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Codex: no warm process and the model barely moves latency, so only the
-            // effort row (its one real lever) is offered.
-            if CompanionSettingsLayout.showsQuickAnswerModelRow(selectedEngineKind: companionManager.selectedEngineKind) {
-            speedRow(
-                label: "Model",
-                options: QuickAnswerModel.offeredCases,
-                title: { $0.displayName },
-                isSelected: { companionManager.quickAnswerSettings.model == $0 },
-                select: { model in
-                    var settings = companionManager.quickAnswerSettings
-                    settings.model = model
-                    companionManager.setQuickAnswerSettings(settings)
-                }
-            )
-            }
-            if companionManager.selectedEngineKind == .codex {
-                codexModelRow
-            }
+            modelRow
             speedRow(
                 label: "Effort",
                 options: QuickAnswerEffort.allCases,
@@ -795,41 +778,24 @@ struct CompanionPanelView: View {
         }
     }
 
-    /// Codex's model, as a dropdown (Codex lists five or more models, too many for a
-    /// segment). Choices come from Codex's own catalog; the config.toml model is the
-    /// default and is labelled as such. The model barely affects Codex latency, so this
-    /// is here so the user can see and choose it, not for speed.
-    private var codexModelRow: some View {
-        let catalog = CodexModelCatalog.load()
-        let selectedSlug = companionManager.quickAnswerSettings.codexModel
-        let defaultLabel = catalog.defaultSlug.map { slug in
-            (catalog.options.first { $0.slug == slug }?.displayName ?? slug) + " (default)"
-        } ?? "Default"
-        let selectedLabel = selectedSlug.flatMap { slug in
-            catalog.options.first { $0.slug == slug }?.displayName ?? slug
-        } ?? defaultLabel
+    /// One model control, the SAME for both engines: a dropdown of what the selected
+    /// engine offers, with the CLI's own default labelled as such. Claude: Sonnet
+    /// (recommended), Opus, or the CLI default; Codex: the models in Codex's own catalog.
+    private var modelRow: some View {
+        let choices = modelChoices
+        let selected = choices.first { $0.isSelected } ?? choices.first
         return HStack(spacing: DS.Spacing.control) {
             Text("Model")
                 .font(DS.Font.overlayCaptionRegular)
                 .foregroundColor(DS.Colors.textTertiary)
                 .frame(width: 44, alignment: .leading)
             Menu {
-                Button(defaultLabel) {
-                    var settings = companionManager.quickAnswerSettings
-                    settings.codexModel = nil
-                    companionManager.setQuickAnswerSettings(settings)
-                }
-                if !catalog.options.isEmpty { Divider() }
-                ForEach(catalog.options) { option in
-                    Button(option.displayName) {
-                        var settings = companionManager.quickAnswerSettings
-                        settings.codexModel = option.slug == catalog.defaultSlug ? nil : option.slug
-                        companionManager.setQuickAnswerSettings(settings)
-                    }
+                ForEach(choices) { choice in
+                    Button(choice.label, action: choice.select)
                 }
             } label: {
                 HStack {
-                    Text(selectedLabel)
+                    Text(selected?.label ?? "Default")
                         .font(DS.Font.overlayCaption)
                         .foregroundColor(DS.Colors.textSecondary)
                         .lineLimit(1)
@@ -838,20 +804,52 @@ struct CompanionPanelView: View {
                         .font(DS.Font.microCaptionEmphasized)
                         .foregroundColor(DS.Colors.textTertiary)
                 }
-                .padding(.horizontal, DS.Spacing.control)
-                .padding(.vertical, DS.Spacing.compact)
-                .background(
-                    RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
-                        .fill(Color.white.opacity(0.06))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
-                        .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
-                )
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .pointerCursor()
+        }
+    }
+
+    private struct ModelChoice: Identifiable {
+        let id: String
+        let label: String
+        let isSelected: Bool
+        let select: () -> Void
+    }
+
+    private var modelChoices: [ModelChoice] {
+        let settings = companionManager.quickAnswerSettings
+        let manager = companionManager
+        func update(_ mutate: @escaping (inout QuickAnswerSettings) -> Void) -> () -> Void {
+            { var next = manager.quickAnswerSettings; mutate(&next); manager.setQuickAnswerSettings(next) }
+        }
+        switch companionManager.selectedEngineKind {
+        case .claudeCode:
+            return [
+                ModelChoice(id: "sonnet", label: "Sonnet (recommended)", isSelected: settings.model == .sonnet, select: update { $0.model = .sonnet }),
+                ModelChoice(id: "opus", label: "Opus", isSelected: settings.model == .opus, select: update { $0.model = .opus }),
+                ModelChoice(id: "default", label: "Claude Code default", isSelected: settings.model == .harnessDefault, select: update { $0.model = .harnessDefault })
+            ]
+        case .codex:
+            let catalog = CodexModelCatalog.load()
+            let defaultName = catalog.defaultSlug.map { slug in catalog.options.first { $0.slug == slug }?.displayName ?? slug }
+            var choices = [ModelChoice(
+                id: "default",
+                label: defaultName.map { "\($0) (default)" } ?? "Codex default",
+                isSelected: settings.codexModel == nil,
+                select: update { $0.codexModel = nil }
+            )]
+            for option in catalog.options where option.slug != catalog.defaultSlug {
+                choices.append(ModelChoice(
+                    id: option.slug, label: option.displayName,
+                    isSelected: settings.codexModel == option.slug,
+                    select: update { $0.codexModel = option.slug }
+                ))
+            }
+            return choices
+        case nil:
+            return []
         }
     }
 

@@ -118,7 +118,7 @@ private struct NewSectionedSettingsReplica: View {
                 if CompanionSettingsLayout.showsQuickAnswerModelRow(selectedEngineKind: .claudeCode) {
                     segment(["Sonnet", "Opus"], selection: "Sonnet")
                 }
-                segment(["Auto", "Low", "Med", "High"], selection: "Auto")
+                segment(["Low", "Med", "High", "Auto"], selection: "Low")
             case .voice:
                 segment(["Apple", "ElevenLabs"], selection: selectedVoice)
             }

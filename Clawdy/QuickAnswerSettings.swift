@@ -10,11 +10,15 @@
 //      opus   default  first text ~3.0s   api ~3.5s   ~$0.024 / turn
 //      sonnet default  first text ~2.1–2.6s api ~2.4s ~$0.011 / turn   ← default
 //      haiku  either   first text 6.5–9s  (slower, not faster — same as the June finding)
-//      --effort low    no measurable speed change on this path (no tool loop to shorten)
+//      --effort low    no change on a trivial question — but on a substantive one
+//                      (a "be thorough" ask that triggers extended thinking) it HALVES
+//                      time-to-first-text: 6.5s → 3.4s and 4.8s → 2.6s (sonnet). A real
+//                      turn in the app showed 11.5s to first text at the user's inherited
+//                      `effortLevel: high` + `alwaysThinkingEnabled`. Disabling thinking
+//                      outright adds nothing beyond `low` (~2.6s either way).
 //
-//  So Sonnet is the default: about a second faster to first audio and half the cost,
-//  with no visible quality loss on a one-or-two-sentence spoken reply. Effort is
-//  exposed because it's cheap to try, not because it's a proven lever here.
+//  So Sonnet + low effort is the default: about a second faster to first audio than Opus
+//  at half the cost, and no multi-second silent think before a longer answer.
 //
 //  Both are `--model` / `--effort` spawn arguments, so a change REBUILDS the warm
 //  engine (cancel in-flight turn, shutdown, prewarm) exactly like an engine switch.
@@ -65,15 +69,15 @@ enum QuickAnswerModel: String, CaseIterable, Identifiable, Codable {
     static let offeredCases: [QuickAnswerModel] = [.sonnet, .opus]
 }
 
-/// The effort level for quick answers. For Claude, `.harnessDefault` omits `--effort` so
-/// the user's own `claude` setting applies (effort showed no measurable effect there).
-/// For Codex, `.harnessDefault` means Clawdy's `low` override (medium was 2× slower);
-/// an explicit level is passed as `-c model_reasoning_effort=<level>`.
+/// The effort level for quick answers; `low` by default for BOTH engines (Claude: halves
+/// time-to-first-text on substantive questions; Codex: 2× faster than medium).
+/// `.harnessDefault` ("Auto") inherits the CLI's own setting: Claude omits `--effort`,
+/// Codex omits the `model_reasoning_effort` override.
 enum QuickAnswerEffort: String, CaseIterable, Identifiable, Codable {
-    case harnessDefault
     case low
     case medium
     case high
+    case harnessDefault
 
     var id: String { rawValue }
 
@@ -96,7 +100,7 @@ enum QuickAnswerEffort: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    static let recommended: QuickAnswerEffort = .harnessDefault
+    static let recommended: QuickAnswerEffort = .low
 }
 
 /// The pair, as threaded into the engine. Equatable so a "did it change?" check is

@@ -75,8 +75,7 @@ final class CoachEngineRegistry {
             // effort override is the one latency lever, so the same setting drives it.
             return CodexEngine(
                 binaryPath: detected.binaryPath,
-                quickAnswerEffort: quickAnswerSettings.effort == .harnessDefault
-                    ? .low : quickAnswerSettings.effort,
+                quickAnswerEffort: quickAnswerSettings.effort,
                 modelSlug: quickAnswerSettings.codexModel
             )
         }

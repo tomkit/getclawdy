@@ -298,7 +298,7 @@ struct CoachEngineTests {
         let recommended = ClaudeCodeEngine.makeArguments(systemPrompt: "s", useClaudeCustomizations: true)
         let modelIndex = recommended.firstIndex(of: "--model")
         #expect(modelIndex != nil && recommended[modelIndex! + 1] == "sonnet")
-        #expect(!recommended.contains("--effort"), "effort defaults to the harness setting")
+        #expect(recommended[recommended.firstIndex(of: "--effort")! + 1] == "low", "low effort by default: it halves time-to-first-text on substantive questions")
 
         let tuned = ClaudeCodeEngine.makeArguments(
             systemPrompt: "s", useClaudeCustomizations: true,
