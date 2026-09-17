@@ -4,6 +4,7 @@
 //
 //  Loads the skills the warm router can hand a request to:
 //
+//      ~/.clawdy/router.md                     the routing prompt template, editable (written once)
 //      ~/.clawdy/skills/README.md              how Clawdy skills + routing work (written once)
 //      ~/.clawdy/skills/research/SKILL.md      the built-in Clawdy skill, editable
 //      ~/.clawdy/skills/<name>/SKILL.md        any Clawdy skill the user writes
@@ -46,11 +47,31 @@ struct ClawdySkillStore {
     )
 
     let clawdySkillsDirectory: URL
+    /// The user-editable routing prompt template (`~/.clawdy/router.md`).
+    let routerTemplateFileURL: URL
     private let fileManager: FileManager
 
-    init(clawdySkillsDirectory: URL, fileManager: FileManager = .default) {
+    init(clawdySkillsDirectory: URL, routerTemplateFileURL: URL? = nil, fileManager: FileManager = .default) {
         self.clawdySkillsDirectory = clawdySkillsDirectory
+        self.routerTemplateFileURL = routerTemplateFileURL
+            ?? clawdySkillsDirectory.deletingLastPathComponent().appendingPathComponent("router.md")
         self.fileManager = fileManager
+    }
+
+    // MARK: - Router template
+
+    /// The routing prompt template: the user's `router.md` if it exists and can still
+    /// list skills, else the built-in default (logged once per load so a broken edit is
+    /// visible without taking routing away).
+    func loadRouterTemplate() -> String {
+        guard let text = try? String(contentsOf: routerTemplateFileURL, encoding: .utf8) else {
+            return ClawdySkillRouterPrompt.defaultTemplate
+        }
+        guard ClawdySkillRouterPrompt.isUsableTemplate(text) else {
+            print("⚠️ \(routerTemplateFileURL.path) has no {{clawdy_skills}} / {{harness_skills}} placeholder — using the built-in routing prompt")
+            return ClawdySkillRouterPrompt.defaultTemplate
+        }
+        return text
     }
 
     // MARK: - Loading
@@ -137,6 +158,14 @@ struct ClawdySkillStore {
                 print("⚠️ Could not write the bundled skill '\(bundled.id)' to \(fileURL.path): \(error)")
             }
         }
+        if !fileManager.fileExists(atPath: routerTemplateFileURL.path) {
+            do {
+                try fileManager.createDirectory(at: routerTemplateFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try ClawdySkillRouterPrompt.defaultTemplate.write(to: routerTemplateFileURL, atomically: true, encoding: .utf8)
+            } catch {
+                print("⚠️ Could not write the routing prompt template to \(routerTemplateFileURL.path): \(error)")
+            }
+        }
         let readmeURL = clawdySkillsDirectory.appendingPathComponent("README.md")
         if !fileManager.fileExists(atPath: readmeURL.path) {
             do {
@@ -187,6 +216,12 @@ struct ClawdySkillStore {
     Clawdy starts that skill in a separate process. So your `description` IS the routing
     rule: say when to use the skill and give an example line. On-screen pointing questions
     are always answered inline, never routed.
+
+    The routing prompt itself is `~/.clawdy/router.md`. Edit it to change how the router
+    decides. Keep the `{{clawdy_skills}}` and `{{harness_skills}}` placeholders (that's
+    where the skill list goes; the `{{#…}} … {{/…}}` blocks around them are dropped when
+    that list is empty). If the file loses both placeholders, Clawdy falls back to the
+    built-in prompt. Changes apply on your next question.
 
     ## Format (same as a Claude Code / Codex skill)
 

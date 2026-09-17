@@ -210,6 +210,18 @@ struct ClawdySkillDirectiveTests {
         }
     }
 
+    /// The routing prompt is a user-editable template: placeholders expand to the skill
+    /// lists, empty-list blocks vanish, and a template that can't list skills is unusable.
+    @Test func routerTemplateExpandsPlaceholdersAndDropsEmptyBlocks() {
+        let template = "rules here\n\n{{#clawdy_skills}}mine:\n{{clawdy_skills}}{{/clawdy_skills}}\n\n{{#harness_skills}}theirs:\n{{harness_skills}}{{/harness_skills}}\n\nend"
+        let both = ClawdySkillRouterPrompt.compose(skills: [trip, pdf], template: template)
+        #expect(both == "rules here\n\nmine:\n[TRIP_PLANNER] — trip-planner: \(trip.description)\n\ntheirs:\n[SKILL:pdf] — pdf: \(pdf.description)\n\nend")
+        let onlyMine = ClawdySkillRouterPrompt.compose(skills: [trip], template: template)
+        #expect(onlyMine == "rules here\n\nmine:\n[TRIP_PLANNER] — trip-planner: \(trip.description)\n\nend")
+        #expect(ClawdySkillRouterPrompt.isUsableTemplate("no placeholders at all") == false)
+        #expect(ClawdySkillRouterPrompt.isUsableTemplate(ClawdySkillRouterPrompt.defaultTemplate) == true)
+    }
+
     @Test func routerPromptListsEverySkillWithItsMarkerAndDescription() {
         let prompt = ClawdySkillRouterPrompt.compose(skills: [.builtInResearch, trip, pdf])
         #expect(prompt.contains("[RESEARCH] — research:"))
@@ -247,12 +259,19 @@ struct ClawdySkillStoreTests {
     @Test func installsDefaultsOnceAndLoadsBuiltInResearchFromDisk() throws {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let store = ClawdySkillStore(clawdySkillsDirectory: directory)
+        let store = ClawdySkillStore(clawdySkillsDirectory: directory, routerTemplateFileURL: directory.appendingPathComponent("router.md"))
 
         store.installDefaultsIfMissing()
         let researchFile = store.clawdySkillFileURL(id: ClawdySkill.builtInResearchID)
         #expect(FileManager.default.fileExists(atPath: researchFile.path))
         #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("README.md").path))
+        #expect(FileManager.default.fileExists(atPath: store.routerTemplateFileURL.path), "the routing prompt ships as an editable file")
+        #expect(store.loadRouterTemplate() == ClawdySkillRouterPrompt.defaultTemplate)
+        // An edited template is used; one that can't list skills falls back to the default.
+        try "my rules\n{{clawdy_skills}}".write(to: store.routerTemplateFileURL, atomically: true, encoding: .utf8)
+        #expect(store.loadRouterTemplate() == "my rules\n{{clawdy_skills}}")
+        try "broken".write(to: store.routerTemplateFileURL, atomically: true, encoding: .utf8)
+        #expect(store.loadRouterTemplate() == ClawdySkillRouterPrompt.defaultTemplate)
         let installed = store.loadSkills()
         #expect(installed.first == .builtInResearch, "the shipped research file loads as exactly the built-in skill")
         #expect(installed.map(\.id) == [ClawdySkill.builtInResearchID, "trip-planner"], "the bundled example skill ships too")

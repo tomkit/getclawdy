@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Clawdy can run your own harness skills.** Skills in `~/.claude/skills` (or `~/.codex/skills` with Codex selected) are offered to the router as `[SKILL:name]`; a matching request runs the skill in a dedicated agent and the result is spoken back. A skill's `description` is the routing rule.
 - Skills without a page (`clawdy-deliverable: none`) speak their result instead of opening a results window.
+- The routing prompt is an editable file, `~/.clawdy/router.md`.
+- `trip-planner` ships as a second bundled skill and the example to copy.
 
 ## [0.0.3] - 2026-09-16
 

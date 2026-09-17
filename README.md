@@ -70,6 +70,8 @@ Because it's your real CLI, your setup comes with it: CLAUDE.md, skills, plugins
 
 Clawdy is a lead agent. It can answer simple questions on its own and will respond quickly. For bigger questions, it will route to a subagent or trigger a plugin (mcp, skill, tool) to help it answer the question.
 
+The routing prompt is a file you can edit: `~/.clawdy/router.md`.
+
 ## Skills
 
 **Clawdy skills** live in `~/.clawdy/skills`. Same `SKILL.md` format, but should be more geared for voice input and spoken output. Two come installed:

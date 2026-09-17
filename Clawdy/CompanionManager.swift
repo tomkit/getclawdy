@@ -184,7 +184,9 @@ final class CompanionManager: ObservableObject {
     /// the first real turn uses so that turn reuses the warm process.
     private func prewarmSelectedEngineIfInstalled() {
         guard let coachEngine = resolveActiveCoachEngine() else { return }
-        coachEngine.prewarm(systemPrompt: Self.companionVoiceResponseSystemPrompt(skills: loadSkills()))
+        coachEngine.prewarm(systemPrompt: Self.companionVoiceResponseSystemPrompt(
+            skills: loadSkills(), routerTemplate: skillStore.loadRouterTemplate()
+        ))
     }
 
     /// The SKILLS the warm router can hand a request to: the built-in research skill, any
@@ -1516,9 +1518,12 @@ final class CompanionManager: ObservableObject {
     /// built-in research skill, the user's Clawdy skills, and their harness skills), then
     /// the fixed pointing guidance. Composed PER TURN so an edited or newly-installed skill
     /// applies on the next question; `ClaudePersistentSession` respawns when it changes.
-    static func companionVoiceResponseSystemPrompt(skills: [ClawdySkill]) -> String {
+    static func companionVoiceResponseSystemPrompt(
+        skills: [ClawdySkill],
+        routerTemplate: String = ClawdySkillRouterPrompt.defaultTemplate
+    ) -> String {
         companionVoiceResponseSystemPromptPreamble
-            + "\n\n" + ClawdySkillRouterPrompt.compose(skills: skills)
+            + "\n\n" + ClawdySkillRouterPrompt.compose(skills: skills, template: routerTemplate)
             + "\n\n" + companionPointingGuidance
     }
 
@@ -1722,7 +1727,9 @@ final class CompanionManager: ObservableObject {
         let hasFollowUpTarget = followUpTargetSessionID != nil
         let availableSkills = loadSkills()
         currentTurnSkills = availableSkills
-        let baseSystemPrompt = Self.companionVoiceResponseSystemPrompt(skills: availableSkills)
+        let baseSystemPrompt = Self.companionVoiceResponseSystemPrompt(
+            skills: availableSkills, routerTemplate: skillStore.loadRouterTemplate()
+        )
         let effectiveSystemPrompt = hasFollowUpTarget
             ? baseSystemPrompt + Self.companionFocusedFollowUpAddendum
             : baseSystemPrompt
