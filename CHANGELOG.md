@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-turn latency log (`log show --predicate 'subsystem == "com.clawdy.Clawdy" AND category == "latency"'`) so slow turns can be attributed to transcription, the model, or speech.
 
 ### Changed
+- **Research pages and History are real windows now.** While one is open Clawdy shows in the Dock and Cmd-Tab, so a page can't get lost behind other apps.
+- **Codex model picker.** The panel shows your Codex default model and lets you pick any model Codex lists.
+- **Quieter recents list and History.** The claw's recents list is a compact "Recent" list sized to its rows; History rows show the skill and time on a second line with a status dot only for running/failed runs, and the detail header shows skill · engine · time.
 - **Simpler menu bar panel.** One right edge for every control, quieter hierarchy, the hotkey shown as keycaps, History and Quit on one row, no close button (click outside or press Escape). The "Use my Claude Code setup" toggle is gone: your setup always loads.
 
 ### Fixed

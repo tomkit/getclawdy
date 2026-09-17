@@ -671,11 +671,11 @@ private struct ResearchHistoryView: View {
     private var sessionList: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Conversations")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(DS.Colors.textSecondary)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(DS.Colors.textTertiary)
                 .padding(.horizontal, 16)
-                .padding(.top, 16)
-                .padding(.bottom, 8)
+                .padding(.top, 14)
+                .padding(.bottom, 6)
 
             if viewModel.rows.isEmpty {
                 emptyListState
@@ -779,17 +779,27 @@ private struct ResearchHistoryView: View {
     private func detailHeader(_ row: HistoryRow) -> some View {
         let signal = HistorySessionRowSignal.forRow(row)
         return HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(row.displayTitle)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(DS.Colors.textPrimary)
                     .lineLimit(2)
-                // ONE quiet secondary signal — the same single token the list rows carry
-                // (relative time, or a status word for a live/ended-abnormally run), never
-                // the old kind · status · time triple.
-                Text(signal.text)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(signal.tone.swatch)
+                // Meta line: what ran it, on which engine, when — and the status word only
+                // when it's an exception (running / failed / stopped / dismissed).
+                HStack(spacing: 6) {
+                    Text(row.skillName)
+                    Text("·")
+                    Text(row.engineKind.displayName)
+                    Text("·")
+                    Text(row.relativeTimestamp)
+                    if signal.tone != .neutral || row.isDismissed || row.status == .stopped {
+                        Text("·")
+                        Text(signal.text)
+                            .foregroundColor(signal.tone.swatch)
+                    }
+                }
+                .font(.system(size: 11, weight: .regular))
+                .foregroundColor(DS.Colors.textTertiary)
             }
 
             Spacer(minLength: 0)
@@ -921,21 +931,35 @@ struct HistorySessionRowView: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 10) {
-                Text(row.displayTitle)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 8)
-                Text(signal.text)
+            HStack(alignment: .top, spacing: 8) {
+                ResearchStatusDot(status: row.status, isDismissed: row.isDismissed)
+                    .padding(.top, 5)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(row.displayTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    // Second line: the skill and the time; the status word only when it
+                    // is an exception, so a list of finished runs reads as calm text.
+                    HStack(spacing: 4) {
+                        Text(row.skillName)
+                        Text("·")
+                        Text(row.relativeTimestamp)
+                        if signal.tone != .neutral || row.status == .stopped || row.isDismissed {
+                            Text("·")
+                            Text(signal.text).foregroundColor(signal.tone.swatch)
+                        }
+                    }
                     .font(.system(size: 11, weight: .regular))
-                    .foregroundColor(signal.tone.swatch)
+                    .foregroundColor(DS.Colors.textTertiary)
                     .lineLimit(1)
+                }
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+            .padding(.vertical, 8)
             // Dismissed sessions read as muted (the run was hidden by the user), while
             // still being fully selectable/reopenable.
             .opacity(row.isDismissed ? 0.5 : 1.0)

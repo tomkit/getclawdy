@@ -120,7 +120,7 @@ enum ResearchRecentsLayout {
     /// Non-zero by construction.
     static let inlineListSize = CGSize(
         width: ResearchStackFrameLayout.expandedPillSize.width,
-        height: 300
+        height: 218
     )
 
     /// Inset from the anchor screen corner's visible frame (matches the toast column).
@@ -1093,7 +1093,7 @@ struct ResearchRecentsInlineListContent: View {
     @ObservedObject var model: ResearchRecentsBadgeModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.control) {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             header
             if model.rows.isEmpty {
                 emptyState
@@ -1102,29 +1102,19 @@ struct ResearchRecentsInlineListContent: View {
             }
             footer
         }
-        .padding(DS.Spacing.lg)
+        .padding(.horizontal, DS.Spacing.md)
+        .padding(.vertical, DS.Spacing.md)
         .frame(width: ResearchRecentsLayout.inlineListSize.width,
                height: ResearchRecentsLayout.inlineListSize.height)
     }
 
-    /// A quiet header: just a small secondary-tone label and the close affordance — no
-    /// accent-coloured icon, no divider beneath it (the whitespace below is the separation).
+    /// A quiet header: one small tertiary label. No close control — the list collapses on
+    /// its own when the pointer leaves it (or on a second click of the badge).
     private var header: some View {
-        HStack(alignment: .center, spacing: DS.Spacing.sm) {
-            Text("Recent research")
-                .font(DS.Font.controlLabel)
-                .foregroundColor(DS.Colors.textSecondary)
-            Spacer()
-            // The canonical circular icon control, with the pointer cursor opted OUT because
-            // this overlay panel never becomes key (its `addCursorRect` cursor would be dead;
-            // the badge window's `.cursorUpdate` tracking area supplies the Clawdy cursor).
-            CircularIconButton(
-                systemName: "xmark",
-                helpText: "Close",
-                showsPointerCursor: false,
-                action: { model.onCloseList?() }
-            )
-        }
+        Text("Recent")
+            .font(DS.Font.overlayCaptionRegular)
+            .foregroundColor(DS.Colors.textTertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var rowsScroll: some View {
@@ -1164,6 +1154,38 @@ struct ResearchRecentsInlineListContent: View {
 /// single-word "Results" label (only when a fenced, on-disk deliverable exists). The redundant "View
 /// conversation" icon is dropped — the whole-row click covers it. A DISMISSED row is dimmed
 /// and its signal reads "dismissed".
+/// A 6pt status dot: red for a failed run, brand-red and softly pulsing for a running one,
+/// muted for stopped/dismissed, and INVISIBLE (a spacer) for a completed run — so the
+/// common case reads as clean text and only exceptions draw the eye.
+struct ResearchStatusDot: View {
+    let status: ResearchSessionStatus
+    var isDismissed: Bool = false
+    @State private var pulsing = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 6, height: 6)
+            .opacity(status == .running && !isDismissed ? (pulsing ? 0.35 : 1) : 1)
+            .onAppear {
+                guard status == .running else { return }
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulsing = true }
+            }
+            .accessibilityHidden(true)
+    }
+
+    private var color: Color {
+        if isDismissed { return DS.Colors.textTertiary.opacity(0.5) }
+        switch status {
+        case .running: return DS.Colors.accent
+        case .active: return Color.clear
+        case .failed: return DS.Colors.destructiveText
+        case .stopped: return DS.Colors.textTertiary
+        case .completed: return Color.clear
+        }
+    }
+}
+
 private struct ResearchRecentsRowView: View {
     let rowModel: ResearchRecentsRowModel
     let onPerformAction: (ResearchRecentsRowAction) -> Void
@@ -1206,7 +1228,7 @@ private struct ResearchRecentsRowView: View {
         .padding(.horizontal, DS.Spacing.control)
         // 9pt vertical has no DS.Spacing token (between `snug` 6 and `control` 10) — a
         // deliberate one-off tuning the row's resting height, so it is left inline.
-        .padding(.vertical, 9)
+        .padding(.vertical, 7)
         // No card at rest — only a faint highlight on hover, so the list reads as one
         // calm column separated by whitespace rather than a stack of boxes.
         .background(

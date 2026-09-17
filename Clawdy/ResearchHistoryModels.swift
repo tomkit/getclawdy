@@ -59,6 +59,9 @@ struct HistoryRow: Identifiable, Equatable {
     /// a Codex row resumes with `codex resume <thread_id>` via the codex binary even while
     /// Claude is the currently-selected engine.
     let engineKind: CoachEngineKind
+    /// The skill that produced the run (`research`, `trip-planner`, a harness skill's
+    /// name…), for the row's meta line. "quick answers" for the grouped root row.
+    let skillName: String
     /// The durable RESUME identifier for this session, or nil when none is available (→ the
     /// "Resume in Terminal" action is hidden/disabled — never a dead resume). Claude resumes
     /// by its own session id (always present); Codex resumes by its `thread_id` (the persisted
@@ -132,6 +135,7 @@ enum HistoryRowBuilder {
             transcriptPath: entry.transcriptPath,
             workingDir: entry.workingDir,
             engineKind: engineKind(for: entry),
+            skillName: entry.skillID ?? ClawdySkill.builtInResearchID,
             resumeIdentifier: resumeIdentifier(for: entry),
             deliverablePath: entry.deliverablePath,
             createdAt: entry.createdAt,
@@ -165,6 +169,7 @@ enum HistoryRowBuilder {
             transcriptPath: representative.transcriptPath,
             workingDir: representative.workingDir,
             engineKind: engineKind(for: representative),
+            skillName: "quick answers",
             resumeIdentifier: resumeIdentifier(for: representative),
             deliverablePath: nil,
             createdAt: earliestCreatedAt,
