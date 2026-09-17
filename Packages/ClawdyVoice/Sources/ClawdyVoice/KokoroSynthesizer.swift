@@ -105,6 +105,9 @@ public actor KokoroSynthesizer {
         let style = try loadVoice(voice)
         var samples: [Float] = []
         for chunk in chunks {
+            // A cancelled caller (the user spoke again) stops paying for chunks it will never
+            // play; one ORT run can't be interrupted, so at most one chunk of work is wasted.
+            try Task.checkCancellation()
             let tokens = KokoroVocabulary.tokenize(chunk)
             guard !tokens.isEmpty else { continue }
             samples += try run(tokens: tokens, style: style, speed: speed)

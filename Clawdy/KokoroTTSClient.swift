@@ -97,9 +97,15 @@ final class KokoroTTSClient: NSObject, SpeechTTSProviding {
 
     /// A sentence whose synthesis has been started (or finished) but not yet played.
     struct PreparedClip {
+        let id = UUID()
         let text: String
         let wavData: Task<Data, Error>
     }
+
+    /// Synthesis tasks that haven't been played yet, so `stopPlayback()` (a re-press, Stop)
+    /// can cancel them — otherwise a six-sentence reply interrupted at sentence two would
+    /// keep the actor busy for seconds and delay the NEXT turn's first clip.
+    private var inFlightPrepareTasks: [UUID: Task<Data, Error>] = [:]
 
     /// Starts synthesizing `text` in the background immediately. Call this as soon as a
     /// sentence is known so the model works while earlier sentences are still playing.
@@ -108,17 +114,23 @@ final class KokoroTTSClient: NSObject, SpeechTTSProviding {
         let voice = self.voice
         let wavData = Task<Data, Error> { [weak self] in
             guard let self, let synthesizer = await self.synthesizer() else { throw KokoroSynthesizerError.modelProducedNoAudio }
+            try Task.checkCancellation()
             let samples = try await synthesizer.synthesize(text: trimmedText, voice: voice)
             return WAVFile.data(samples: samples, sampleRate: KokoroSynthesizer.sampleRate)
         }
-        return PreparedClip(text: trimmedText, wavData: wavData)
+        let clip = PreparedClip(text: trimmedText, wavData: wavData)
+        inFlightPrepareTasks[clip.id] = wavData
+        return clip
     }
 
     /// Plays a prepared clip: awaits its synthesis, the cue gate, then starts playback and
     /// returns (the caller polls `isPlaying` for the end, like the Apple client).
     func speak(preparedClip: PreparedClip) async throws {
         clipsAwaitingPlayback += 1
-        defer { clipsAwaitingPlayback -= 1 }
+        defer {
+            clipsAwaitingPlayback -= 1
+            inFlightPrepareTasks[preparedClip.id] = nil
+        }
         let wavData = try await preparedClip.wavData.value
         try Task.checkCancellation()
         await playbackGate?()
@@ -141,6 +153,8 @@ final class KokoroTTSClient: NSObject, SpeechTTSProviding {
     }
 
     func stopPlayback() {
+        for task in inFlightPrepareTasks.values { task.cancel() }
+        inFlightPrepareTasks = [:]
         currentPlayer?.stop()
         currentPlayer = nil
     }
