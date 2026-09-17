@@ -111,7 +111,7 @@ struct ResearchStepIndicatorSignalTests {
         #expect(ResearchStepIndicator.forPhase(.done) ==
                 ResearchStepIndicator(icon: "checkmark", word: "Done"))
         #expect(ResearchStepIndicator.forPhase(.needsInput) ==
-                ResearchStepIndicator(icon: "questionmark", word: "Ask"))
+                ResearchStepIndicator(icon: "mic.fill", word: "Answer"))
         #expect(ResearchStepIndicator.forPhase(.running) == nil)
         #expect(ResearchStepIndicator.forPhase(.error) == nil)
         #expect(ResearchStepIndicator.forPhase(.stopped) == nil)
@@ -122,7 +122,7 @@ struct ResearchStepIndicatorSignalTests {
         #expect(ResearchStepIndicator.current(phase: .done, statusLine: "View results ›") ==
                 ResearchStepIndicator(icon: "checkmark", word: "Done"))
         #expect(ResearchStepIndicator.current(phase: .needsInput, statusLine: "I need a quick answer — click to reply") ==
-                ResearchStepIndicator(icon: "questionmark", word: "Ask"))
+                ResearchStepIndicator(icon: "mic.fill", word: "Answer"))
         #expect(ResearchStepIndicator.current(phase: .running, statusLine: "Searching the web for aomori…") ==
                 ResearchStepIndicator(icon: "magnifyingglass", word: "Search"))
         #expect(ResearchStepIndicator.current(phase: .running, statusLine: "Reading example.com…") ==

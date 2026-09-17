@@ -254,9 +254,12 @@ struct ResearchOverlayState: Equatable {
 
     /// The plan phase asked clarifying questions: move to `.needsInput`, show the
     /// "needs your input" prompt, and log it.
-    mutating func markNeedsInput() {
+    mutating func markNeedsInput(question: String? = nil) {
         phase = .needsInput
-        statusLine = ResearchStatusLine.needsYourInput
+        // The question itself is the status line (spoken aloud at the same time); the
+        // fallback prompt covers a plan that paused without a readable question.
+        let trimmedQuestion = question?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        statusLine = trimmedQuestion.isEmpty ? ResearchStatusLine.needsYourInput : trimmedQuestion
         appendLogEntry("Waiting for your answer…")
     }
 

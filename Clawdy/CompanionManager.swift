@@ -65,7 +65,30 @@ final class CompanionManager: ObservableObject {
             // Announcements (research start/done/error) wait while the user is recording
             // or the reply is speaking, and drain once the companion is idle again.
             spokenCues.setReplyOrRecordingActive(voiceState != .idle)
+            if voiceState == .idle { speakNextQueuedLineIfIdle() }
         }
+    }
+
+    /// Lines to speak at the next quiet moment (a research run's clarifying question).
+    /// Unlike the pre-rendered cues these are live text, spoken through the reply path,
+    /// and they wait their turn exactly like an announcement: never over a reply, never
+    /// while the user is recording.
+    private var linesToSpeakWhenQuiet: [String] = []
+
+    /// Speaks `line` now if the companion is idle, else once it is.
+    func speakWhenQuiet(_ line: String) {
+        let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedLine.isEmpty else { return }
+        linesToSpeakWhenQuiet.append(trimmedLine)
+        speakNextQueuedLineIfIdle()
+    }
+
+    private func speakNextQueuedLineIfIdle() {
+        guard voiceState == .idle, !linesToSpeakWhenQuiet.isEmpty else { return }
+        let nextLine = linesToSpeakWhenQuiet.removeFirst()
+        // The follow-up speak path settles `voiceState` back to `.idle` when the
+        // utterance ends, which drains the next queued line through `didSet`.
+        speakResearchFollowUpAnswer(nextLine)
     }
     @Published private(set) var lastTranscript: String?
     @Published private(set) var currentAudioPowerLevel: CGFloat = 0
@@ -294,6 +317,11 @@ final class CompanionManager: ObservableObject {
         // subsystem stays lazily created on first use.
         manager.onFollowUpSpokenAnswer = { [weak self] spokenReply in
             self?.speakResearchFollowUpAnswer(spokenReply)
+        }
+        // A clarifying question is SPOKEN (a typed panel mid-conversation is unnatural),
+        // at the next quiet moment, and the user's next push-to-talk is the answer.
+        manager.onClarificationQuestion = { [weak self] question in
+            self?.speakWhenQuiet(question)
         }
         return manager
     }()
@@ -1805,6 +1833,19 @@ final class CompanionManager: ObservableObject {
     private func sendTranscriptToClaudeWithScreenshot(transcript: String) {
         currentResponseTask?.cancel()
         stopAllTTS()
+
+        // A research run is waiting on a clarifying question it just asked aloud: this
+        // utterance IS the answer. It goes straight to that session (no warm turn, no
+        // router), the acknowledgement cue still plays, and the fillers are dropped
+        // because no spoken reply follows.
+        if researchSessionManager.answerAwaitingClarification(with: transcript) {
+            spokenCues.turnEnded()
+            cancelThinkingCue()
+            conversationHistory.append((userTranscript: transcript, assistantResponse: "(answered the research question)"))
+            voiceState = .idle
+            scheduleTransientHideIfNeeded()
+            return
+        }
 
         // LINEAGE follow-up routing: the warm agent stays the router. When a research
         // session is FOCUSED (the user opened / is viewing its page), we DON'T short-

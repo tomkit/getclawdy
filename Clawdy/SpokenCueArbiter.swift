@@ -24,7 +24,12 @@ import Foundation
 final class SpokenCueArbiter {
     private let schedule: [AcknowledgementCueSchedule.Step]
     private let renderer: AcknowledgementCueRenderer
+    /// The filler steps (3 s / 8 s / 15 s), cancelled when the turn ends any way.
     private var scheduledTasks: [Task<Void, Never>] = []
+    /// The acknowledgement step (the 1 s "mm-hm"), kept when a turn ends WITHOUT a spoken
+    /// reply (a research hand-off, a voice answer to a question) — the user still gets
+    /// their nod — and cancelled only by a hard stop or a replacing announcement.
+    private var acknowledgementTask: Task<Void, Never>?
     private var cuePlayer: AVAudioPlayer?
     private var replyHasBegun = false
     private var turnHasEnded = true
@@ -68,15 +73,21 @@ final class SpokenCueArbiter {
                 continue
             }
             let delayNanoseconds = UInt64(step.delaySeconds * 1_000_000_000)
-            scheduledTasks.append(Task { [weak self] in
+            let task = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: delayNanoseconds)
                 guard !Task.isCancelled, let self else { return }
-                guard AcknowledgementCueSchedule.shouldFire(
-                    step: step, replyHasBegun: self.replyHasBegun, turnHasEnded: self.turnHasEnded
-                ) else { return }
+                if isAcknowledgementStep {
+                    // The nod fires unless the reply already started talking.
+                    guard !self.replyHasBegun else { return }
+                } else {
+                    guard AcknowledgementCueSchedule.shouldFire(
+                        step: step, replyHasBegun: self.replyHasBegun, turnHasEnded: self.turnHasEnded
+                    ) else { return }
+                }
                 self.play(from: step.phrases)
                 if isAcknowledgementStep { self.hasSpokenAcknowledgementThisTurn = true }
-            })
+            }
+            if isAcknowledgementStep { acknowledgementTask = task } else { scheduledTasks.append(task) }
         }
     }
 
@@ -86,7 +97,9 @@ final class SpokenCueArbiter {
         cancelScheduledFillers()
     }
 
-    /// The turn ended without a spoken reply (a routing directive, an error, a cancel).
+    /// The turn ended without a spoken reply (a routing directive, a voice answer to a
+    /// research question, an error). The fillers are dropped; a not-yet-spoken
+    /// acknowledgement still plays — the user gets one nod either way.
     func turnEnded() {
         turnHasEnded = true
         cancelScheduledFillers()
@@ -96,6 +109,8 @@ final class SpokenCueArbiter {
     func cancelTurn() {
         turnHasEnded = true
         cancelScheduledFillers()
+        acknowledgementTask?.cancel()
+        acknowledgementTask = nil
         cuePlayer?.stop()
         cuePlayer = nil
     }
@@ -130,6 +145,8 @@ final class SpokenCueArbiter {
         let alreadyAcknowledged = hasSpokenAcknowledgementThisTurn
         turnEnded()
         guard !alreadyAcknowledged else { return }
+        acknowledgementTask?.cancel()
+        acknowledgementTask = nil
         hasSpokenAcknowledgementThisTurn = true
         announce(phrase)
     }
@@ -148,7 +165,8 @@ final class SpokenCueArbiter {
     var hasSpokenAcknowledgementThisTurnForTesting: Bool { hasSpokenAcknowledgementThisTurn }
     /// Marks the turn's acknowledgement as spoken (as the scheduled step would).
     func markAcknowledgementSpokenForTesting() { hasSpokenAcknowledgementThisTurn = true }
-    var scheduledFillerCountForTesting: Int { scheduledTasks.count }
+    var scheduledFillerCountForTesting: Int { scheduledTasks.count + (acknowledgementTask == nil ? 0 : 1) }
+    var isAcknowledgementPendingForTesting: Bool { acknowledgementTask != nil }
 
     // MARK: - Playback
 

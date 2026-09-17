@@ -193,7 +193,7 @@ struct ResearchStepIndicator: Equatable {
         case .done:
             return ResearchStepIndicator(icon: "checkmark", word: "Done")
         case .needsInput:
-            return ResearchStepIndicator(icon: "questionmark", word: "Ask")
+            return ResearchStepIndicator(icon: "mic.fill", word: "Answer")
         case .running, .idle, .error, .stopped:
             return nil
         }
@@ -329,6 +329,12 @@ struct ResearchFullToastView: View {
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay(
+            // While a question is waiting, an accent outline marks THIS pill as the
+            // conversation the next push-to-talk answers (the aura alone reads as "busy").
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(DS.Colors.accent, lineWidth: viewModel.phase == .needsInput ? 1.5 : 0)
+        )
     }
 
     // MARK: Full toast body
@@ -351,9 +357,18 @@ struct ResearchFullToastView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer(minLength: DS.Spacing.compact)
-                    // The quiet clock: the one signal a minutes-long run needs so it never
-                    // reads as stuck. Frozen at the total once the run ends.
-                    ResearchElapsedTimeLabel(runClock: viewModel.runClock)
+                    if viewModel.phase == .needsInput {
+                        // The pill is now the thing you're talking to: say how to answer.
+                        Text(ResearchStatusLine.answerByVoiceHint)
+                            .font(DS.Font.overlayCaption)
+                            .foregroundColor(DS.Colors.accent)
+                            .lineLimit(1)
+                            .fixedSize()
+                    } else {
+                        // The quiet clock: the one signal a minutes-long run needs so it never
+                        // reads as stuck. Frozen at the total once the run ends.
+                        ResearchElapsedTimeLabel(runClock: viewModel.runClock)
+                    }
                 }
                 statusRow
             }

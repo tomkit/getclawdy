@@ -110,6 +110,9 @@ final class ResearchSession {
     /// terminal auto-hide. NOT called on plain progress events (those update the pill
     /// live through `overlayViewModel`).
     var onLifecycleChanged: ((ResearchSession) -> Void)?
+    /// The plan phase paused on a clarifying question: the manager speaks it (when the
+    /// companion is quiet) and routes the user's next push-to-talk here as the answer.
+    var onClarificationQuestionAsked: ((ResearchSession, String) -> Void)?
     /// The manager's handler for a tap on this session's compact pill (focus / open
     /// clarify / open results, depending on phase).
     var onCompactTapRequested: ((ResearchSession) -> Void)?
@@ -355,6 +358,24 @@ final class ResearchSession {
         queuedFollowUpPrompts.removeAll()
         clarificationPanel.hide()
         resultsWindow.hide()
+    }
+
+    /// True while the plan phase is waiting on the user's answer.
+    var isAwaitingClarification: Bool { state == .awaitingClarification }
+
+    /// The user answered the clarifying question by VOICE (the next push-to-talk after
+    /// the question was asked). Resumes into the execute phase exactly as the typed
+    /// panel's Submit does. Returns false when this session isn't waiting on an answer.
+    @discardableResult
+    func answerClarification(_ answer: String) -> Bool {
+        guard state == .awaitingClarification,
+              let engine = activeEngine,
+              let outputDirectory = activeOutputDirectory else { return false }
+        let trimmedAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAnswer.isEmpty else { return false }
+        clarificationPanel.hide()
+        resumeWithClarification(engine: engine, outputDirectory: outputDirectory, answer: trimmedAnswer)
+        return true
     }
 
     /// Opens THIS session's clarify panel (invoked by the manager when the pill is
@@ -673,9 +694,10 @@ final class ResearchSession {
                 state = .awaitingClarification
                 currentRunTask = nil
                 pendingClarificationQuestions = questions
-                overlayState.markNeedsInput()
+                overlayState.markNeedsInput(question: questions)
                 pushOverlayStateToViewModel()
                 notifyLifecycleChanged()
+                onClarificationQuestionAsked?(self, questions)
             case .readyToExecute:
                 // Resume the SAME pre-minted id (claude echoed it back verbatim) from
                 // the SAME stable directory.

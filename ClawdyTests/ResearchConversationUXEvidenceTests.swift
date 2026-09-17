@@ -92,6 +92,19 @@ struct ResearchConversationUXEvidenceTests {
         dump(render(toast, pointSize: size), named: "error-pill")
     }
 
+    /// The pill while a clarifying question waits: the question as the status line, a
+    /// mic glyph, the "⌃⌥ to answer" hint in place of the clock, and an accent outline.
+    @Test func awaitingAnswerPillEvidence() {
+        let vm = viewModel(phase: .needsInput, task: "plan a week in japan", status: "Which cities, and roughly what budget per day?")
+        let padding: CGFloat = 24
+        let toast = ResearchFullToastView(viewModel: vm, reduceMotionEnabled: true)
+            .clawdyGlow(cornerRadius: ResearchFullToastGeometry.cornerRadius, radius: ClawdyGlow.maximumSafeRadius)
+            .padding(padding)
+        let size = CGSize(width: ResearchFullToastGeometry.toastSize.width + padding * 2,
+                          height: ResearchFullToastGeometry.toastSize.height + padding * 2)
+        dump(render(toast, pointSize: size), named: "awaiting-answer-pill")
+    }
+
     // MARK: - ITEM 6: the per-session chat panel wearing the Clawdy aura
 
     @Test func perSessionChatPanelAuraEvidence() {

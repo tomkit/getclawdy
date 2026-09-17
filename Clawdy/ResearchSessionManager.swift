@@ -83,6 +83,25 @@ final class ResearchSessionManager: ObservableObject {
     /// selection, so it's spoken exactly like a quick answer. One shared closure for
     /// all sessions — the answer is always routed to the same voice output.
     var onFollowUpSpokenAnswer: ((String) -> Void)?
+    /// A session's plan phase asked a clarifying question; the companion speaks it.
+    var onClarificationQuestion: ((String) -> Void)?
+
+    /// The session the next push-to-talk should ANSWER: the most recently started run
+    /// whose plan phase is waiting on a clarifying question, or nil.
+    var sessionAwaitingClarification: ResearchSession? {
+        for sessionID in sessionOrder.reversed() {
+            if let session = sessionsByID[sessionID], session.isAwaitingClarification { return session }
+        }
+        return nil
+    }
+
+    /// Routes a spoken transcript to the waiting session as its clarification answer.
+    /// Returns false when no session is waiting (the caller runs a normal turn).
+    @discardableResult
+    func answerAwaitingClarification(with transcript: String) -> Bool {
+        guard let session = sessionAwaitingClarification else { return false }
+        return session.answerClarification(transcript)
+    }
 
     /// Sessions in a terminal stopped/error state auto-hide after this linger, exactly
     /// as the old single overlay did (`done` persists so results stay reachable).
@@ -630,6 +649,9 @@ final class ResearchSessionManager: ObservableObject {
         }
         session.onFollowUpAnswerReady = { [weak self] spokenReply in
             self?.onFollowUpSpokenAnswer?(spokenReply)
+        }
+        session.onClarificationQuestionAsked = { [weak self] _, question in
+            self?.onClarificationQuestion?(question)
         }
     }
 

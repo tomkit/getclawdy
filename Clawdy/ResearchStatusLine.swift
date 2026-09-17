@@ -18,7 +18,9 @@ enum ResearchStatusLine {
     static let planning = "Planning the research…"
     /// Shown when the plan agent needs answers before it can proceed. Clicking the
     /// overlay in this state opens the clarifying-question input panel.
-    static let needsYourInput = "I need a quick answer — click to reply"
+    static let needsYourInput = "I have a quick question — hold ⌃⌥ to answer"
+    /// The title-row hint shown beside a waiting question (replaces the elapsed clock).
+    static let answerByVoiceHint = "⌃⌥ to answer"
     /// Shown while a voice follow-up turn is continuing a finished session.
     static let workingOnFollowUp = "Working on your follow-up…"
     /// The terminal, tappable affordance once the deliverable HTML is ready.

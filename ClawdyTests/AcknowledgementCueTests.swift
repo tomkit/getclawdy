@@ -72,6 +72,23 @@ struct SpokenCueArbiterTests {
         #expect(arbiter.scheduledFillerCountForTesting == 0, "a routed/failed turn drops them too")
     }
 
+    /// A turn that ends without a spoken reply (a research hand-off, a voice answer to a
+    /// research question) keeps its pending acknowledgement: the user still gets the nod.
+    @Test func turnEndedKeepsThePendingAcknowledgementButDropsFillers() {
+        let renderer = AcknowledgementCueRenderer(cacheRootDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("no-cues"))
+        let arbiter = SpokenCueArbiter(schedule: [
+            .init(delaySeconds: 1, phrases: ["mm-hm."]),
+            .init(delaySeconds: 3, phrases: ["let me look."])
+        ], renderer: renderer)
+        arbiter.setVoice(.apple(voiceIdentifier: nil))
+        arbiter.beginTurn()
+        arbiter.turnEnded()
+        #expect(arbiter.isAcknowledgementPendingForTesting)
+        #expect(arbiter.scheduledFillerCountForTesting == 1, "only the acknowledgement remains")
+        arbiter.cancelTurn()
+        #expect(!arbiter.isAcknowledgementPendingForTesting, "a hard stop cancels it")
+    }
+
     /// A research hand-off must produce exactly ONE acknowledgement, whichever comes first.
     @Test func researchStartIsSkippedWhenTheTurnWasAlreadyAcknowledgedAndReplacesItOtherwise() {
         let renderer = AcknowledgementCueRenderer(cacheRootDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("no-cues"))
@@ -87,9 +104,9 @@ struct SpokenCueArbiterTests {
 
         // Router was quicker than the 1 s beat → the pending "mm-hm" is cancelled and "on it" stands in.
         arbiter.beginTurn()
-        #expect(arbiter.scheduledFillerCountForTesting == 1)
+        #expect(arbiter.isAcknowledgementPendingForTesting)
         arbiter.announceResearchStart("on it.")
-        #expect(arbiter.scheduledFillerCountForTesting == 0, "the pending acknowledgement is cancelled")
+        #expect(!arbiter.isAcknowledgementPendingForTesting, "the pending acknowledgement is cancelled")
         #expect(arbiter.queuedAnnouncementCountForTesting == 1, "the research line is the acknowledgement")
         #expect(arbiter.hasSpokenAcknowledgementThisTurnForTesting)
     }

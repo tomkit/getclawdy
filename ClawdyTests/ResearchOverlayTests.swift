@@ -86,6 +86,9 @@ struct ResearchOverlayStateTests {
         state.markNeedsInput()
         #expect(state.phase == .needsInput)
         #expect(state.statusLine == ResearchStatusLine.needsYourInput)
+        var asked = ResearchOverlayState()
+        asked.markNeedsInput(question: "Which cities?")
+        #expect(asked.statusLine == "Which cities?", "the spoken question is the pill's status line")
         #expect(state.isCancellable == true)
         #expect(state.compactTapOpensPrimaryAction == true)
     }
