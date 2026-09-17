@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Speed settings.** Pick the model and effort for quick answers in the menu bar panel; the control is the same for both engines. Sonnet + low effort is now the default for Claude (about a second faster to the first spoken word than Opus at half the cost, and no multi-second silent think before a longer answer: low effort halved time-to-first-text on substantive questions in testing). For Codex, low effort is about 2× faster than medium.
+- **Fast mode switch.** Turns on the engine's own fast tier for quick answers: Claude Code fast mode (Opus only) or Codex `service_tier=fast` (about a second faster per reply). Off by default; both cost more.
 - Per-turn latency log (`log show --predicate 'subsystem == "com.clawdy.Clawdy" AND category == "latency"'`) so slow turns can be attributed to transcription, the model, or speech.
 
 ### Changed

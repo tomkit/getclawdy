@@ -658,7 +658,8 @@ final class CompanionManager: ObservableObject {
     @Published private(set) var quickAnswerSettings: QuickAnswerSettings = QuickAnswerSettings(
         model: UserDefaults.standard.string(forKey: .quickAnswerModel).flatMap(QuickAnswerModel.init(rawValue:)) ?? .recommended,
         effort: UserDefaults.standard.string(forKey: .quickAnswerEffort).flatMap(QuickAnswerEffort.init(rawValue:)) ?? .recommended,
-        codexModel: UserDefaults.standard.string(forKey: .quickAnswerCodexModel)
+        codexModel: UserDefaults.standard.string(forKey: .quickAnswerCodexModel),
+        fastMode: UserDefaults.standard.bool(forKey: .quickAnswerFastMode)
     )
 
     func setQuickAnswerSettings(_ settings: QuickAnswerSettings) {
@@ -671,6 +672,7 @@ final class CompanionManager: ObservableObject {
         } else {
             UserDefaults.standard.removeObject(forKey: DefaultsKey.quickAnswerCodexModel.rawValue)
         }
+        UserDefaults.standard.set(settings.fastMode, forKey: .quickAnswerFastMode)
         // Model/effort are spawn args: rebuild the warm engine so the next turn uses them.
         cancelInFlightTurnAndShutDownActiveEngineSession()
         activeCoachEngineCache = nil

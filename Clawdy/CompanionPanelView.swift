@@ -775,6 +775,46 @@ struct CompanionPanelView: View {
                     companionManager.setQuickAnswerSettings(settings)
                 }
             )
+            fastModeRow
+        }
+    }
+
+    /// The engine's own fast tier, as one switch: Claude's fast mode (Opus only) or
+    /// Codex's `service_tier=fast`. Both cost more per token, so it's off by default.
+    private var fastModeRow: some View {
+        HStack(spacing: DS.Spacing.control) {
+            Text("Fast")
+                .font(DS.Font.overlayCaptionRegular)
+                .foregroundColor(DS.Colors.textTertiary)
+                .frame(width: 44, alignment: .leading)
+            Text(fastModeHint)
+                .font(DS.Font.overlayCaptionRegular)
+                .foregroundColor(DS.Colors.textTertiary)
+                .lineLimit(1)
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { companionManager.quickAnswerSettings.fastMode },
+                set: { enabled in
+                    var settings = companionManager.quickAnswerSettings
+                    settings.fastMode = enabled
+                    companionManager.setQuickAnswerSettings(settings)
+                }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .tint(DS.Colors.accent)
+            .scaleEffect(0.7)
+            .frame(height: 20)
+        }
+    }
+
+    private var fastModeHint: String {
+        switch companionManager.selectedEngineKind {
+        case .claudeCode:
+            return companionManager.quickAnswerSettings.model == .sonnet
+                ? "Opus only; costs more" : "faster output; costs more"
+        case .codex: return "≈1s faster; more credits"
+        case nil: return ""
         }
     }
 

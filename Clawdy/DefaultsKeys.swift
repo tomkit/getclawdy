@@ -34,6 +34,8 @@ enum DefaultsKey: String {
     case quickAnswerEffort = "quickAnswerEffort"
     /// The Codex `-m` model slug for quick answers (absent = the user's config.toml default).
     case quickAnswerCodexModel = "quickAnswerCodexModel"
+    /// Whether the engines' fast tier is on for quick answers.
+    case quickAnswerFastMode = "quickAnswerFastMode"
 
     /// Which TTS engine the user has chosen (apple / elevenLabs).
     case selectedTTSEngine = "selectedTTSEngine"

@@ -70,17 +70,21 @@ final class CodexEngine: CoachEngine {
     private let quickAnswerEffort: QuickAnswerEffort
     /// The `-m` model slug, or nil for the user's config.toml default.
     private let modelSlug: String?
+    /// Codex's fast tier (`-c service_tier=fast`); measured ~1s faster per reply.
+    private let fastMode: Bool
 
     init(
         binaryPath: String,
         homeDirectoryPath: String = NSHomeDirectory(),
         quickAnswerEffort: QuickAnswerEffort = .low,
-        modelSlug: String? = nil
+        modelSlug: String? = nil,
+        fastMode: Bool = false
     ) {
         self.binaryPath = binaryPath
         self.homeDirectoryPath = homeDirectoryPath
         self.quickAnswerEffort = quickAnswerEffort
         self.modelSlug = modelSlug
+        self.fastMode = fastMode
     }
 
     /// The `-c model_reasoning_effort=…` override for an effort choice, or nil to
@@ -96,7 +100,8 @@ final class CodexEngine: CoachEngine {
         workingDirectoryPath: String,
         imageFilePaths: [String],
         quickAnswerEffort: QuickAnswerEffort = .low,
-        modelSlug: String? = nil
+        modelSlug: String? = nil,
+        fastMode: Bool = false
     ) -> [String] {
         var arguments = [
             "exec",
@@ -113,6 +118,9 @@ final class CodexEngine: CoachEngine {
         }
         if let modelSlug, !modelSlug.isEmpty {
             arguments.append(contentsOf: ["-m", modelSlug])
+        }
+        if fastMode {
+            arguments.append(contentsOf: ["-c", "service_tier=fast"])
         }
         for imageFilePath in imageFilePaths {
             arguments.append("-i")
@@ -148,7 +156,8 @@ final class CodexEngine: CoachEngine {
             workingDirectoryPath: temporaryDirectory.path,
             imageFilePaths: screenshotFiles.map { $0.absolutePath },
             quickAnswerEffort: quickAnswerEffort,
-            modelSlug: modelSlug
+            modelSlug: modelSlug,
+            fastMode: fastMode
         )
 
         let environment = CLIProcessRunner.makeChildEnvironment(homeDirectoryPath: homeDirectoryPath)

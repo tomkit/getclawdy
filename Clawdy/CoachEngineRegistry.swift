@@ -76,7 +76,8 @@ final class CoachEngineRegistry {
             return CodexEngine(
                 binaryPath: detected.binaryPath,
                 quickAnswerEffort: quickAnswerSettings.effort,
-                modelSlug: quickAnswerSettings.codexModel
+                modelSlug: quickAnswerSettings.codexModel,
+                fastMode: quickAnswerSettings.fastMode
             )
         }
     }

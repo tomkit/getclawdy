@@ -140,6 +140,11 @@ final class ClaudeCodeEngine: CoachEngine {
         if let effort = quickAnswerSettings.effort.claudeEffortArgument {
             arguments.append(contentsOf: ["--effort", effort])
         }
+        // Claude Code's fast mode has no `-p` flag; it's a settings override. The CLI
+        // ignores it on models that don't support it (Sonnet), so it's safe to pass.
+        if quickAnswerSettings.fastMode {
+            arguments.append(contentsOf: ["--settings", #"{"fastMode":true}"#])
+        }
         arguments.append(contentsOf: [
             "--input-format", "stream-json",
             "--output-format", "stream-json",

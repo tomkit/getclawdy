@@ -112,6 +112,12 @@ struct QuickAnswerSettings: Equatable, Codable {
     /// choices come from Codex's own catalog (`CodexModelCatalog`). Measured 2026-09-17:
     /// the model barely moves Codex latency (effort does), so this is for choice, not speed.
     var codexModel: String? = nil
+    /// The engines' own "fast" tiers, propagated to the lead (quick-answer) agent:
+    /// Claude `--settings '{"fastMode":true}'` (Opus only; 2.5× output speed claimed, ~12%
+    /// measured on a long answer, higher per-token price), Codex `-c service_tier=fast`
+    /// (measured ~1s faster per reply; 2–2.5× credits). Off by default: it costs more and,
+    /// for Claude, Sonnet + low effort already reaches first audio sooner.
+    var fastMode: Bool = false
 
     static let recommended = QuickAnswerSettings(model: .recommended, effort: .recommended)
 }

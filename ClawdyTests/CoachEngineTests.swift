@@ -312,6 +312,15 @@ struct CoachEngineTests {
             quickAnswerSettings: QuickAnswerSettings(model: .harnessDefault, effort: .harnessDefault)
         )
         #expect(!inherited.contains("--model") && !inherited.contains("--effort"))
+        #expect(!inherited.contains("--settings"), "fast mode is off by default")
+        let fast = ClaudeCodeEngine.makeArguments(
+            systemPrompt: "s", useClaudeCustomizations: true,
+            quickAnswerSettings: QuickAnswerSettings(model: .opus, effort: .low, fastMode: true)
+        )
+        #expect(fast[fast.firstIndex(of: "--settings")! + 1] == #"{"fastMode":true}"#)
+        let codexFast = CodexEngine.makeArguments(workingDirectoryPath: "/w", imageFilePaths: [], fastMode: true)
+        #expect(codexFast.contains("service_tier=fast"))
+        #expect(!CodexEngine.makeArguments(workingDirectoryPath: "/w", imageFilePaths: []).contains("service_tier=fast"))
     }
 
     /// Codex's one latency lever is the reasoning-effort override: low by default,
