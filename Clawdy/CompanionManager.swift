@@ -214,6 +214,7 @@ final class CompanionManager: ObservableObject {
     /// hand-off in the conversation history and settles the voice state; the session
     /// itself runs in its own separate process and reports through its own overlay.
     private func handOffToSkill(_ skill: ClawdySkill, taskDescription: String, transcript: String) {
+        acknowledgementCues.turnEnded()
         stopAllTTS()
         cancelThinkingCue()
         conversationHistory.append((
@@ -682,6 +683,33 @@ final class CompanionManager: ObservableObject {
     /// Per-turn latency marks (`log show … category == "latency"`).
     let turnLatencyLog = TurnLatencyLog()
 
+    /// The "I heard you / still working" cues: an earcon the instant the key is released,
+    /// then voice-matched fillers on a schedule until the reply's audio preempts them.
+    private let acknowledgementCues = AcknowledgementCuePlayer()
+
+    /// The voice the reply will use this turn, so cues can be rendered/played in it.
+    private var currentCueVoice: AcknowledgementCueRenderer.Voice {
+        switch TTSProviderSelection.resolveProviderKind(selectedEngine: selectedTTSEngineKind, hasUsableElevenLabsKey: hasElevenLabsAPIKey) {
+        case .elevenLabs: return .elevenLabs(voiceID: elevenLabsVoiceID)
+        case .apple: return .apple(voiceIdentifier: LocalSpeechTTSClient.preferredVoiceIdentifier)
+        }
+    }
+
+    /// Pre-renders the filler phrases for the current voice in the background (cached on
+    /// disk; already-rendered phrases are skipped). Called at launch and on voice changes.
+    private func renderAcknowledgementCuesForCurrentVoice() {
+        let voice = currentCueVoice
+        let renderer = AcknowledgementCueRenderer()
+        let phrases = AcknowledgementCueSchedule.allPhrases()
+        let apiKey: String? = {
+            if case .elevenLabs = voice { return loadElevenLabsAPIKeyFromKeychain() }
+            return nil
+        }()
+        Task.detached(priority: .utility) {
+            await renderer.renderMissing(phrases: phrases, voice: voice, elevenLabsAPIKey: apiKey)
+        }
+    }
+
     // MARK: - Text-to-Speech Settings
 
     /// The (non-secret) TTS preferences are keyed by `DefaultsKey`. The API key
@@ -713,6 +741,7 @@ final class CompanionManager: ObservableObject {
         UserDefaults.standard.bool(forKey: .hasElevenLabsAPIKey)
 
     func setSelectedTTSEngine(_ engineKind: TTSEngineKind) {
+        defer { renderAcknowledgementCuesForCurrentVoice() }
         selectedTTSEngineKind = engineKind
         UserDefaults.standard.set(engineKind.rawValue, forKey: .selectedTTSEngine)
     }
@@ -721,6 +750,7 @@ final class CompanionManager: ObservableObject {
     /// the stored value. Updates the NON-SECRET `hasElevenLabsAPIKey` flag (derived
     /// from the value just saved — no Keychain read-back) so the UI reflects it.
     func saveElevenLabsAPIKey(_ apiKey: String) {
+        defer { renderAcknowledgementCuesForCurrentVoice() }
         TTSKeychainStore.saveAPIKey(apiKey)
         setHasElevenLabsAPIKeyFlag(TTSProviderSelection.isUsableElevenLabsKey(apiKey))
     }
@@ -754,6 +784,7 @@ final class CompanionManager: ObservableObject {
     }
 
     func setElevenLabsVoiceID(_ voiceID: String) {
+        defer { renderAcknowledgementCuesForCurrentVoice() }
         let trimmedVoiceID = voiceID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedVoiceID.isEmpty else { return }
         elevenLabsVoiceID = trimmedVoiceID
@@ -877,6 +908,7 @@ final class CompanionManager: ObservableObject {
         // speech synthesizer and spawn the warm coaching process now, so the
         // user's FIRST push-to-talk doesn't pay either cold start.
         localTTSClient.prewarm()
+        renderAcknowledgementCuesForCurrentVoice()
         prewarmSelectedEngineIfInstalled()
 
         // If the user already completed onboarding AND all permissions are
@@ -1353,6 +1385,7 @@ final class CompanionManager: ObservableObject {
         switch transition {
         case .pressed:
             guard !buddyDictationManager.isDictationInProgress else { return }
+            acknowledgementCues.cancel()
 
             // When everything is granted, fall straight through to recording — no
             // permission request, no onboarding. Only when a permission is genuinely
@@ -1457,6 +1490,7 @@ final class CompanionManager: ObservableObject {
             // leaves the waveform overlay stuck on screen indefinitely.
             ClawdyAnalytics.trackPushToTalkReleased()
             turnLatencyLog.beginTurn()
+            acknowledgementCues.beginTurn(voice: currentCueVoice)
             pendingKeyboardShortcutStartTask?.cancel()
             pendingKeyboardShortcutStartTask = nil
             buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
@@ -1887,6 +1921,7 @@ final class CompanionManager: ObservableObject {
                     elevenLabsAPIKeyProvider: loadElevenLabsAPIKeyFromKeychain,
                     elevenLabsVoiceID: elevenLabsVoiceID,
                     onPlaybackStarted: { [weak self] in
+                        self?.acknowledgementCues.replyAudioStarted()
                         self?.turnLatencyLog.firstAudio()
                         self?.voiceState = .responding
                         // Audio has begun — the thinking cue is no longer needed.
@@ -1936,6 +1971,7 @@ final class CompanionManager: ObservableObject {
                     skills: availableSkills
                 ) {
                 case .followUpFocusedSession:
+                    acknowledgementCues.turnEnded()
                     stopAllTTS()
                     cancelThinkingCue()
                     // Route the user's SPOKEN prompt (not the directive restatement) to the
@@ -2075,6 +2111,7 @@ final class CompanionManager: ObservableObject {
                 // An unexpected error ended the turn. Guaranteed teardown so annotation
                 // mode never wedges when capture, engine, or encoding throws.
                 teardownAnnotationMode()
+                acknowledgementCues.turnEnded()
                 ClawdyAnalytics.trackResponseError(error: error.localizedDescription)
                 print("⚠️ Companion response error: \(error)")
                 speakLocalErrorFallback(for: error)
@@ -2177,6 +2214,7 @@ final class CompanionManager: ObservableObject {
     /// queue. Called when the user speaks again so a new utterance never overlaps
     /// the previous one.
     private func stopAllTTS() {
+        acknowledgementCues.cancel()
         currentResponseSpeaker?.cancel()
         currentResponseSpeaker = nil
         currentSentenceBuffer = nil

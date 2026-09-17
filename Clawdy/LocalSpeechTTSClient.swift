@@ -28,6 +28,24 @@ final class LocalSpeechTTSClient: NSObject, SpeechTTSProviding {
         speechSynthesizer.delegate = self
     }
 
+    /// The best installed system voice for the current language: a Premium voice if the
+    /// user has downloaded one (System Settings → Accessibility → Spoken Content), else
+    /// Enhanced, else the compact default. Premium/Enhanced are neural and far less
+    /// robotic; they can't be bundled, so this only helps when one is already installed.
+    nonisolated static func preferredVoice() -> AVSpeechSynthesisVoice? {
+        let languageCode = AVSpeechSynthesisVoice.currentLanguageCode()
+        let languagePrefix = String(languageCode.prefix(2))
+        let candidates = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix(languagePrefix) }
+        func best(_ quality: AVSpeechSynthesisVoiceQuality) -> AVSpeechSynthesisVoice? {
+            candidates.first { $0.quality == quality && $0.language == languageCode }
+                ?? candidates.first { $0.quality == quality }
+        }
+        return best(.premium) ?? best(.enhanced) ?? AVSpeechSynthesisVoice(language: languageCode)
+    }
+
+    /// The identifier of the voice replies use (so cues can be rendered in the same voice).
+    nonisolated static var preferredVoiceIdentifier: String? { preferredVoice()?.identifier }
+
     /// Primes AVSpeechSynthesizer so the FIRST real spoken response doesn't pay the
     /// one-time engine warmup (allocating the audio unit + loading the voice), which
     /// otherwise adds a noticeable hitch before the first utterance. We speak a
@@ -41,7 +59,7 @@ final class LocalSpeechTTSClient: NSObject, SpeechTTSProviding {
 
         let primingUtterance = AVSpeechUtterance(string: " ")
         primingUtterance.volume = 0
-        if let preferredVoice = AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode()) {
+        if let preferredVoice = Self.preferredVoice() {
             primingUtterance.voice = preferredVoice
         }
         speechSynthesizer.speak(primingUtterance)
@@ -60,8 +78,8 @@ final class LocalSpeechTTSClient: NSObject, SpeechTTSProviding {
         }
 
         let utterance = AVSpeechUtterance(string: trimmedText)
-        // Use the user's selected system voice for their locale when available.
-        if let preferredVoice = AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode()) {
+        // The best installed voice for the locale (Premium > Enhanced > compact).
+        if let preferredVoice = Self.preferredVoice() {
             utterance.voice = preferredVoice
         }
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
