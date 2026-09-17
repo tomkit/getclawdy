@@ -42,6 +42,8 @@ enum DefaultsKey: String {
 
     /// The ElevenLabs voice id the user picked (or typed manually).
     case elevenLabsVoiceID = "elevenLabsVoiceID"
+    /// The bundled Kokoro voice id ("af_heart" by default).
+    case kokoroVoiceID = "kokoroVoiceID"
 
     /// NON-SECRET flag mirroring whether a usable ElevenLabs key is saved. The
     /// secret itself never lives in UserDefaults — only in the Keychain.

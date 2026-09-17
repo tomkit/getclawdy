@@ -8,6 +8,7 @@
 //
 
 import AVFoundation
+import ClawdyVoice
 import SwiftUI
 
 struct CompanionPanelView: View {
@@ -995,16 +996,16 @@ struct CompanionPanelView: View {
 
     // MARK: - TTS (Voice) Settings
 
-    /// Lets the user choose the text-to-speech engine. Apple is the free,
-    /// on-device default; ElevenLabs uses the user's own API key for
-    /// higher-quality speech. When ElevenLabs is selected, exposes the key
-    /// entry and voice picker.
+    /// Lets the user choose the text-to-speech engine. The bundled Kokoro voice is
+    /// the free, on-device default (with a small voice menu); ElevenLabs uses the
+    /// user's own API key. When ElevenLabs is selected, exposes the key entry and
+    /// voice picker. (Apple's synthesizer is only an invisible fallback, never a choice.)
     private var ttsSettingsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             // The "Voice" section header names this control, so the provider segment sits
             // on its own line rather than repeating the label.
             HStack(spacing: 0) {
-                ForEach(TTSEngineKind.allCases) { ttsEngineKind in
+                ForEach(TTSEngineKind.userSelectableCases) { ttsEngineKind in
                     ttsEngineOptionButton(ttsEngineKind: ttsEngineKind)
                 }
             }
@@ -1019,7 +1020,40 @@ struct CompanionPanelView: View {
 
             if companionManager.selectedTTSEngineKind == .elevenLabs {
                 elevenLabsConfiguration
+            } else if companionManager.selectedTTSEngineKind == .kokoro {
+                kokoroVoicePickerRow
             }
+        }
+    }
+
+    /// The bundled voices (Kokoro's best-graded six), as the same compact Voice menu row
+    /// the ElevenLabs picker uses.
+    private var kokoroVoicePickerRow: some View {
+        HStack {
+            Text("Voice")
+                .font(DS.Font.overlayCaptionRegular)
+                .foregroundColor(DS.Colors.textTertiary)
+            Spacer()
+            Menu {
+                ForEach(KokoroVoice.bundled) { voice in
+                    Button(action: { companionManager.setKokoroVoiceID(voice.id) }) {
+                        if voice.id == companionManager.kokoroVoiceID {
+                            Label(voice.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(voice.displayName)
+                        }
+                    }
+                }
+            } label: {
+                Text(KokoroVoice.bundled.first { $0.id == companionManager.kokoroVoiceID }?.displayName ?? KokoroVoice.defaultVoice.displayName)
+                    .font(DS.Font.overlayCaption)
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(1)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .pointerCursor()
+            .menuTextHover()
         }
     }
 

@@ -3,10 +3,10 @@
 //  Clawdy
 //
 //  Common abstraction over the text-to-speech backends Clawdy can speak
-//  through. The on-device Apple synthesizer (`LocalSpeechTTSClient`) is the
-//  free default and the automatic fallback; the optional ElevenLabs client
-//  (`ElevenLabsTTSClient`) calls the ElevenLabs API directly with the user's
-//  own key for higher-quality speech.
+//  through. The bundled Kokoro voice (`KokoroTTSClient`, on-device, free) is the
+//  default; the optional ElevenLabs client (`ElevenLabsTTSClient`) calls the
+//  ElevenLabs API directly with the user's own key; the Apple synthesizer
+//  (`LocalSpeechTTSClient`) is the invisible last resort when Kokoro can't load.
 //
 //  Everything in this file that decides WHICH provider to use and WHEN to fall
 //  back is a pure, side-effect-free function so it can be unit-tested headlessly
@@ -98,16 +98,23 @@ extension SpeechTTSProviding {
 
 /// Which text-to-speech engine the user has chosen in settings.
 enum TTSEngineKind: String, CaseIterable, Identifiable {
-    /// On-device `AVSpeechSynthesizer`. Free, always available, no key.
+    /// The bundled Kokoro-82M voice, on-device via ONNX Runtime. Free, no key. The default.
+    case kokoro
+    /// On-device `AVSpeechSynthesizer`. Not offered in the picker any more — it is only the
+    /// fallback when the Kokoro model can't load (the case stays so old persisted values decode).
     case apple
     /// ElevenLabs cloud TTS, called directly with the user's own API key.
     case elevenLabs
 
     var id: String { rawValue }
 
+    /// The engines the settings picker offers (Apple is a silent fallback, never a choice).
+    static let userSelectableCases: [TTSEngineKind] = [.kokoro, .elevenLabs]
+
     /// Short label for the settings picker.
     var displayName: String {
         switch self {
+        case .kokoro: return "Built-in"
         case .apple: return "Apple"
         case .elevenLabs: return "ElevenLabs"
         }
@@ -117,9 +124,16 @@ enum TTSEngineKind: String, CaseIterable, Identifiable {
     /// trade-off (free/local vs. their own paid key).
     var settingsSubtitle: String {
         switch self {
-        case .apple: return "Free, on-device"
+        case .kokoro: return "Free, on-device"
+        case .apple: return "System voice"
         case .elevenLabs: return "Your API key"
         }
+    }
+
+    /// A previously persisted "apple" choice (the old default) becomes the new default.
+    static func fromPersisted(_ rawValue: String?) -> TTSEngineKind {
+        guard let rawValue, let kind = TTSEngineKind(rawValue: rawValue) else { return .kokoro }
+        return kind == .apple ? .kokoro : kind
     }
 }
 
@@ -129,18 +143,23 @@ enum TTSProviderSelection {
     /// Decides which provider should actually speak an utterance, given the
     /// user's selected engine and whether a usable ElevenLabs key is present.
     ///
-    /// Apple is always usable. ElevenLabs is only usable when the user both
-    /// selected it AND has a non-empty key configured; otherwise we silently
-    /// resolve to Apple so the voice flow never goes silent.
+    /// Kokoro is usable when its model loaded; Apple is always usable. ElevenLabs is
+    /// only usable when the user both selected it AND has a non-empty key configured.
+    /// Anything unusable silently resolves to the next best (Kokoro, then Apple) so
+    /// the voice flow never goes silent.
     static func resolveProviderKind(
         selectedEngine: TTSEngineKind,
-        hasUsableElevenLabsKey: Bool
+        hasUsableElevenLabsKey: Bool,
+        isKokoroAvailable: Bool = true
     ) -> TTSEngineKind {
+        let localDefault: TTSEngineKind = isKokoroAvailable ? .kokoro : .apple
         switch selectedEngine {
+        case .kokoro:
+            return localDefault
         case .apple:
             return .apple
         case .elevenLabs:
-            return hasUsableElevenLabsKey ? .elevenLabs : .apple
+            return hasUsableElevenLabsKey ? .elevenLabs : localDefault
         }
     }
 

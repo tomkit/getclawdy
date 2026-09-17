@@ -7,6 +7,7 @@
 //  cue is rendered in the same voice the reply will use, so it sounds like the same
 //  speaker pausing rather than a UI beep:
 //
+//    • Kokoro (the default): synthesized on-device through `KokoroTTSClient`; WAV on disk.
 //    • Apple: `AVSpeechSynthesizer.write` into a CAF file (the selected system voice).
 //    • ElevenLabs: one `/stream` request per phrase per voice (≈20 characters each, a
 //      one-time cost when a voice is first used); MP3 on disk.
@@ -18,17 +19,20 @@
 //
 
 import AVFoundation
+import ClawdyVoice
 import CryptoKit
 import Foundation
 
 struct AcknowledgementCueRenderer {
     /// Which voice a cue must match.
     enum Voice: Equatable {
+        case kokoro(voiceID: String)
         case apple(voiceIdentifier: String?)
         case elevenLabs(voiceID: String)
 
         var cacheDirectoryName: String {
             switch self {
+            case .kokoro(let voiceID): return "kokoro-" + Self.safe(voiceID)
             case .apple(let identifier): return "apple-" + Self.safe(identifier ?? "default")
             case .elevenLabs(let voiceID): return "elevenlabs-" + Self.safe(voiceID)
             }
@@ -36,6 +40,7 @@ struct AcknowledgementCueRenderer {
 
         var fileExtension: String {
             switch self {
+            case .kokoro: return "wav"
             case .apple: return "caf"
             case .elevenLabs: return "mp3"
             }
@@ -77,13 +82,19 @@ struct AcknowledgementCueRenderer {
     func renderMissing(
         phrases: [String],
         voice: Voice,
-        elevenLabsAPIKey: String? = nil
+        elevenLabsAPIKey: String? = nil,
+        kokoroTTSClient: KokoroTTSClient? = nil
     ) async {
         for phrase in phrases where cachedFileURL(phrase: phrase, voice: voice) == nil {
             let destination = fileURL(phrase: phrase, voice: voice)
             do {
                 try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
                 switch voice {
+                case .kokoro(let voiceID):
+                    guard let kokoroTTSClient else { return }
+                    let kokoroVoice = KokoroVoice.bundled.first { $0.id == voiceID } ?? .defaultVoice
+                    let wavData = try await kokoroTTSClient.renderWAV(phrase, voice: kokoroVoice)
+                    try wavData.write(to: destination, options: .atomic)
                 case .apple(let voiceIdentifier):
                     try await Self.renderWithApple(phrase: phrase, voiceIdentifier: voiceIdentifier, to: destination)
                 case .elevenLabs(let voiceID):

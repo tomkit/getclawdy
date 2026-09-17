@@ -26,7 +26,40 @@ struct TTSTests {
     }
 
     @Test func elevenLabsSelectionFallsBackToAppleWithoutKey() {
-        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .elevenLabs, hasUsableElevenLabsKey: false) == .apple)
+        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .elevenLabs, hasUsableElevenLabsKey: false, isKokoroAvailable: false) == .apple)
+    }
+
+    // MARK: - Kokoro (the bundled default)
+
+    @Test func kokoroIsTheDefaultAndAppleOnlyWhenItCannotLoad() {
+        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .kokoro, hasUsableElevenLabsKey: false) == .kokoro)
+        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .kokoro, hasUsableElevenLabsKey: true) == .kokoro)
+        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .kokoro, hasUsableElevenLabsKey: false, isKokoroAvailable: false) == .apple)
+    }
+
+    @Test func elevenLabsWithoutKeyFallsBackToKokoroBeforeApple() {
+        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .elevenLabs, hasUsableElevenLabsKey: false, isKokoroAvailable: true) == .kokoro)
+    }
+
+    @Test func persistedAppleChoiceMigratesToKokoroAndApplesIsNotOffered() {
+        #expect(TTSEngineKind.fromPersisted(nil) == .kokoro)
+        #expect(TTSEngineKind.fromPersisted("apple") == .kokoro)
+        #expect(TTSEngineKind.fromPersisted("elevenLabs") == .elevenLabs)
+        #expect(TTSEngineKind.fromPersisted("kokoro") == .kokoro)
+        #expect(TTSEngineKind.userSelectableCases == [.kokoro, .elevenLabs])
+    }
+
+    @Test func pronunciationOverridesFileParsesWordColonPhonemes() {
+        let parsed = PronunciationOverridesFile.parse("""
+        # comment
+        Clawdy: klˈɔdi
+
+        tomkit = tˈɑmkɪt
+        broken line without separator
+        : no word
+        """)
+        #expect(parsed == ["clawdy": "klˈɔdi", "tomkit": "tˈɑmkɪt"])
+        #expect(PronunciationOverridesFile.parse(PronunciationOverridesFile.template).isEmpty)
     }
 
     // MARK: - Usable key detection

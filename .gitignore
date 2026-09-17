@@ -23,3 +23,9 @@ evidence/
 SCREEN_RECORDING_REFERENCE.md
 .vercel
 .env*
+
+# Bundled voice model (downloaded by scripts/fetch-models.sh)
+Clawdy/Models/
+
+# Swift package build products
+Packages/*/.build/
