@@ -1,8 +1,12 @@
 <p align="center">
-  <img src="assets/clawdy-banner.png" width="720" alt="Clawdy: Your AI, out of its shell. A free AI cursor buddy for your Mac." />
+  <img src="assets/clawdy-logo.png" width="96" alt="Clawdy" />
 </p>
 
 <h1 align="center">Your AI, out of its shell.</h1>
+
+<p align="center">
+  <img src="assets/clawdy-hero.png" width="860" alt="Clawdy, a small red lobster, has broken out of a shattered terminal window and stands beside the mouse cursor on a spreadsheet, pointing at a broken cell and saying: This one. It's pointing at a deleted row." />
+</p>
 
 <p align="center"><strong>Clawdy is an AI cursor buddy for Mac. It sees your screen, talks back, and points at exactly what it means. In any app.</strong></p>
 
@@ -43,14 +47,6 @@ Any window, any app, every monitor. If you can see it, Clawdy can see it.
 **Point at your screen and talk.** Clawdy answers out loud and the claw flies to what it means.
 
 ![Clawdy planning a coastal route in Aomori](assets/demo-route.gif)
-
-**Ask a big question.** Clawdy researches the web and builds you a page.
-
-![Clawdy researching things to do in Aomori](assets/demo-research.gif)
-
-**Circle something.** Draw on the screen while you talk and Clawdy sees the circle too.
-
-![Clawdy pointing out places of interest in Aomori](assets/demo-poi.gif)
 
 ## Get started
 
