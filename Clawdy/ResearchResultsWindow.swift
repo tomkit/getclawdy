@@ -102,6 +102,9 @@ final class ResearchResultsWindowController: NSObject, NSWindowDelegate, WKNavig
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // A results page is a first-class window: while it's open the app shows in the
+        // Dock and Cmd-Tab so the page can't get lost behind other apps.
+        FirstClassWindowPolicy.windowDidShow(window)
 
         // Now that the window is on screen it has a valid window number. Register
         // it as capturable so the screenshot path exempts it from the blanket
@@ -130,6 +133,7 @@ final class ResearchResultsWindowController: NSObject, NSWindowDelegate, WKNavig
         cancelInFlightAffordance()
         unregisterAsCapturable()
         window?.orderOut(nil)
+        if let window { FirstClassWindowPolicy.windowDidHide(window) }
     }
 
     /// Whether the results window is currently on screen. Drives the follow-up view
@@ -148,6 +152,7 @@ final class ResearchResultsWindowController: NSObject, NSWindowDelegate, WKNavig
     func windowWillClose(_ notification: Notification) {
         cancelInFlightAffordance()
         unregisterAsCapturable()
+        if let window { FirstClassWindowPolicy.windowDidHide(window) }
     }
 
     // MARK: - Render-time broken-image safety net (layer B)

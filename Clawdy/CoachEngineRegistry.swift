@@ -76,7 +76,8 @@ final class CoachEngineRegistry {
             return CodexEngine(
                 binaryPath: detected.binaryPath,
                 quickAnswerEffort: quickAnswerSettings.effort == .harnessDefault
-                    ? .low : quickAnswerSettings.effort
+                    ? .low : quickAnswerSettings.effort,
+                modelSlug: quickAnswerSettings.codexModel
             )
         }
     }

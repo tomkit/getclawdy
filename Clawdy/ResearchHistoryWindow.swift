@@ -149,7 +149,16 @@ struct HistorySessionRowSignal: Equatable {
 @MainActor
 final class ResearchHistoryWindowController {
     private var window: NSWindow?
-    private let viewModel = ResearchHistoryViewModel()
+    private let viewModel: ResearchHistoryViewModel
+
+    /// `manifestStore` is injectable so a test can show the REAL window over a temp
+    /// manifest (for pixel evidence) without touching the user's history.
+    init(manifestStore: ResearchManifestStore = .shared) {
+        self.viewModel = ResearchHistoryViewModel(manifestStore: manifestStore)
+    }
+
+    /// The live window, for pixel-evidence tests.
+    var windowForTesting: NSWindow? { window }
     /// The window's close observer. Held so its lifetime matches the window; on close it
     /// suspends the view model's live-lifecycle subscription so no dangling sink lingers
     /// while the window is hidden (re-established on the next `show()`).
@@ -215,6 +224,8 @@ final class ResearchHistoryWindowController {
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // First-class window: Dock + Cmd-Tab while it's open (see FirstClassWindowPolicy).
+        FirstClassWindowPolicy.windowDidShow(window)
     }
 
     private func createWindowIfNeeded() {
@@ -239,8 +250,9 @@ final class ResearchHistoryWindowController {
         // reference) so no Combine sink lingers while the window is hidden. `show()`
         // re-establishes it. Not a retain-cycle fix (the sink already captures self weakly) —
         // it makes the "torn down on close" behavior real.
-        let observer = HistoryWindowCloseObserver { [weak self] in
+        let observer = HistoryWindowCloseObserver { [weak self, weak historyWindow] in
             self?.viewModel.followUpRouter = nil
+            if let historyWindow { FirstClassWindowPolicy.windowDidHide(historyWindow) }
         }
         historyWindow.delegate = observer
         closeObserver = observer

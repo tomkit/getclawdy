@@ -778,6 +778,9 @@ struct CompanionPanelView: View {
                 }
             )
             }
+            if companionManager.selectedEngineKind == .codex {
+                codexModelRow
+            }
             speedRow(
                 label: "Effort",
                 options: QuickAnswerEffort.allCases,
@@ -789,6 +792,66 @@ struct CompanionPanelView: View {
                     companionManager.setQuickAnswerSettings(settings)
                 }
             )
+        }
+    }
+
+    /// Codex's model, as a dropdown (Codex lists five or more models, too many for a
+    /// segment). Choices come from Codex's own catalog; the config.toml model is the
+    /// default and is labelled as such. The model barely affects Codex latency, so this
+    /// is here so the user can see and choose it, not for speed.
+    private var codexModelRow: some View {
+        let catalog = CodexModelCatalog.load()
+        let selectedSlug = companionManager.quickAnswerSettings.codexModel
+        let defaultLabel = catalog.defaultSlug.map { slug in
+            (catalog.options.first { $0.slug == slug }?.displayName ?? slug) + " (default)"
+        } ?? "Default"
+        let selectedLabel = selectedSlug.flatMap { slug in
+            catalog.options.first { $0.slug == slug }?.displayName ?? slug
+        } ?? defaultLabel
+        return HStack(spacing: DS.Spacing.control) {
+            Text("Model")
+                .font(DS.Font.overlayCaptionRegular)
+                .foregroundColor(DS.Colors.textTertiary)
+                .frame(width: 44, alignment: .leading)
+            Menu {
+                Button(defaultLabel) {
+                    var settings = companionManager.quickAnswerSettings
+                    settings.codexModel = nil
+                    companionManager.setQuickAnswerSettings(settings)
+                }
+                if !catalog.options.isEmpty { Divider() }
+                ForEach(catalog.options) { option in
+                    Button(option.displayName) {
+                        var settings = companionManager.quickAnswerSettings
+                        settings.codexModel = option.slug == catalog.defaultSlug ? nil : option.slug
+                        companionManager.setQuickAnswerSettings(settings)
+                    }
+                }
+            } label: {
+                HStack {
+                    Text(selectedLabel)
+                        .font(DS.Font.overlayCaption)
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .lineLimit(1)
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(DS.Font.microCaptionEmphasized)
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
+                .padding(.horizontal, DS.Spacing.control)
+                .padding(.vertical, DS.Spacing.compact)
+                .background(
+                    RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: DS.CornerRadius.small, style: .continuous)
+                        .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .pointerCursor()
         }
     }
 
@@ -1516,7 +1579,8 @@ struct MenuSegmentOptionButton: View {
 /// grouping and top-to-bottom order can be unit-tested with no SwiftUI.
 enum CompanionSettingsControl: Equatable {
     case enginePicker
-    /// The quick-answer model segment (Claude only — Codex's model barely moves latency).
+    /// The quick-answer model control: a Sonnet/Opus segment for Claude, a dropdown of
+    /// Codex's own listed models for Codex.
     case quickAnswerModel
     /// The quick-answer effort segment (both engines; it's Codex's one latency lever).
     case quickAnswerEffort
@@ -1544,8 +1608,7 @@ enum CompanionSettingsLayout {
     /// The sections, top-to-bottom.
     static let orderedSections: [CompanionSettingsSection] = [.engine, .voice]
 
-    /// Whether the quick-answer Model segment appears — only for Claude, where the model
-    /// choice is the measured lever (Sonnet ≈1s faster than Opus). Codex's isn't.
+    /// Whether the Claude Sonnet/Opus SEGMENT appears (Codex gets a catalog dropdown instead).
     static func showsQuickAnswerModelRow(selectedEngineKind: CoachEngineKind?) -> Bool {
         selectedEngineKind == .claudeCode
     }
@@ -1558,10 +1621,8 @@ enum CompanionSettingsLayout {
         switch section {
         case .engine:
             var controls: [CompanionSettingsControl] = [.enginePicker]
-            if showsQuickAnswerModelRow(selectedEngineKind: selectedEngineKind) {
-                controls.append(.quickAnswerModel)
-            }
             if selectedEngineKind != nil {
+                controls.append(.quickAnswerModel)
                 controls.append(.quickAnswerEffort)
             }
             return controls

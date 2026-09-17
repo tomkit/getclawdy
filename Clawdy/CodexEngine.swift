@@ -68,15 +68,19 @@ final class CodexEngine: CoachEngine {
     /// 2026-09-17 (codex 0.153.4, gpt-6-astra, one-shot with a screenshot): medium ≈ 9s
     /// to the reply, low ≈ 4s. The model choice, by contrast, barely moves it.
     private let quickAnswerEffort: QuickAnswerEffort
+    /// The `-m` model slug, or nil for the user's config.toml default.
+    private let modelSlug: String?
 
     init(
         binaryPath: String,
         homeDirectoryPath: String = NSHomeDirectory(),
-        quickAnswerEffort: QuickAnswerEffort = .low
+        quickAnswerEffort: QuickAnswerEffort = .low,
+        modelSlug: String? = nil
     ) {
         self.binaryPath = binaryPath
         self.homeDirectoryPath = homeDirectoryPath
         self.quickAnswerEffort = quickAnswerEffort
+        self.modelSlug = modelSlug
     }
 
     /// The `-c model_reasoning_effort=…` override for an effort choice, or nil to
@@ -91,7 +95,8 @@ final class CodexEngine: CoachEngine {
     static func makeArguments(
         workingDirectoryPath: String,
         imageFilePaths: [String],
-        quickAnswerEffort: QuickAnswerEffort = .low
+        quickAnswerEffort: QuickAnswerEffort = .low,
+        modelSlug: String? = nil
     ) -> [String] {
         var arguments = [
             "exec",
@@ -105,6 +110,9 @@ final class CodexEngine: CoachEngine {
         // leaves the user's config.toml in charge.
         if let effortOverride = reasoningEffortOverride(for: quickAnswerEffort) {
             arguments.append(contentsOf: ["-c", effortOverride])
+        }
+        if let modelSlug, !modelSlug.isEmpty {
+            arguments.append(contentsOf: ["-m", modelSlug])
         }
         for imageFilePath in imageFilePaths {
             arguments.append("-i")
@@ -139,7 +147,8 @@ final class CodexEngine: CoachEngine {
         let arguments = Self.makeArguments(
             workingDirectoryPath: temporaryDirectory.path,
             imageFilePaths: screenshotFiles.map { $0.absolutePath },
-            quickAnswerEffort: quickAnswerEffort
+            quickAnswerEffort: quickAnswerEffort,
+            modelSlug: modelSlug
         )
 
         let environment = CLIProcessRunner.makeChildEnvironment(homeDirectoryPath: homeDirectoryPath)

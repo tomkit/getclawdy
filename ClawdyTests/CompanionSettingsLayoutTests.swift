@@ -36,11 +36,11 @@ struct CompanionSettingsLayoutTests {
         )
     }
 
-    @Test func codexEngineShowsOnlyEffort() {
-        #expect(!CompanionSettingsLayout.showsQuickAnswerModelRow(selectedEngineKind: .codex))
+    @Test func codexEngineShowsModelDropdownAndEffort() {
+        #expect(!CompanionSettingsLayout.showsQuickAnswerModelRow(selectedEngineKind: .codex), "Codex gets a catalog dropdown, not the Sonnet/Opus segment")
         #expect(
             CompanionSettingsLayout.controls(in: .engine, selectedEngineKind: .codex)
-                == [.enginePicker, .quickAnswerEffort]
+                == [.enginePicker, .quickAnswerModel, .quickAnswerEffort]
         )
     }
 

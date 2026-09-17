@@ -32,6 +32,8 @@ enum DefaultsKey: String {
     case quickAnswerModel = "quickAnswerModel"
     /// The warm quick-answer path's `--effort` choice (`QuickAnswerEffort` raw value).
     case quickAnswerEffort = "quickAnswerEffort"
+    /// The Codex `-m` model slug for quick answers (absent = the user's config.toml default).
+    case quickAnswerCodexModel = "quickAnswerCodexModel"
 
     /// Which TTS engine the user has chosen (apple / elevenLabs).
     case selectedTTSEngine = "selectedTTSEngine"

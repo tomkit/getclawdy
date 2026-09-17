@@ -104,6 +104,10 @@ enum QuickAnswerEffort: String, CaseIterable, Identifiable, Codable {
 struct QuickAnswerSettings: Equatable, Codable {
     var model: QuickAnswerModel
     var effort: QuickAnswerEffort
+    /// The Codex `-m` model slug, or nil to use the user's `config.toml` default. Offered
+    /// choices come from Codex's own catalog (`CodexModelCatalog`). Measured 2026-09-17:
+    /// the model barely moves Codex latency (effort does), so this is for choice, not speed.
+    var codexModel: String? = nil
 
     static let recommended = QuickAnswerSettings(model: .recommended, effort: .recommended)
 }

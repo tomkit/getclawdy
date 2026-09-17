@@ -326,6 +326,29 @@ struct CoachEngineTests {
         #expect(!inherited.contains { $0.hasPrefix("model_reasoning_effort=") })
     }
 
+    /// Codex's model choice comes from Codex's own catalog cache and config.toml; only
+    /// listed models are offered, in the CLI's priority order, and a chosen slug becomes `-m`.
+    @Test func codexModelCatalogParsesOnlyListedModelsAndTheConfigDefault() {
+        let cache = """
+        {"models":[
+          {"slug":"gpt-6-astra","display_name":"GPT-6-Astra","visibility":"list","priority":1},
+          {"slug":"gpt-reserve","display_name":"GPT-Reserve","visibility":"hide","priority":3},
+          {"slug":"gpt-5.5","display_name":"GPT-5.5","visibility":"list","priority":12},
+          {"slug":"gpt-5.6-sol","display_name":"GPT-5.6-Sol","visibility":"list","priority":4}
+        ]}
+        """.data(using: .utf8)!
+        let options = CodexModelCatalog.parseListedModels(cacheJSON: cache)
+        #expect(options.map(\.slug) == ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.5"])
+        #expect(options[0].displayName == "GPT-6-Astra")
+        #expect(CodexModelCatalog.parseDefaultModel(configTOML: "model = \"gpt-6-astra\"\nmodel_reasoning_effort = \"medium\"\n[model_providers.x]\nmodel = \"other\"") == "gpt-6-astra")
+        #expect(CodexModelCatalog.parseDefaultModel(configTOML: "[section]\nmodel = \"x\"") == nil)
+        #expect(CodexModelCatalog.parseListedModels(cacheJSON: Data("nope".utf8)).isEmpty)
+
+        let args = CodexEngine.makeArguments(workingDirectoryPath: "/w", imageFilePaths: [], modelSlug: "gpt-5.5")
+        #expect(args[args.firstIndex(of: "-m")! + 1] == "gpt-5.5")
+        #expect(!CodexEngine.makeArguments(workingDirectoryPath: "/w", imageFilePaths: []).contains("-m"))
+    }
+
     @Test func claudeCodeArgumentsUsePrintModeStreamJSONInputAndNoTools() {
         // Default setting: customizations load (safe-mode OMITTED).
         let arguments = ClaudeCodeEngine.makeArguments(systemPrompt: "you are clawdy", useClaudeCustomizations: true)
