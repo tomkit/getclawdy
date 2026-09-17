@@ -22,6 +22,7 @@ Clawdy runs on your own local Claude Code or Codex, using your subscription toke
 
 - You talk. Hold the keys and speak. No typing.
 - It sees what you see. Every window, every monitor.
+- Draw on your screen. Circle or scribble on anything while you talk, and Clawdy sees the marks.
 - It talks back, out loud, while you keep working.
 - It points. The claw cursor lands on the exact spot.
 
