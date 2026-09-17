@@ -438,10 +438,11 @@ struct ResearchRecentsBadgeWindowTests {
     /// tracking area are EXACTLY the badge's OWN square — there is no phantom hover region
     /// over the empty space the expansion would grow into, and the square is DISJOINT from
     /// the shared toast footprint (proving `restingPillSize` was not repurposed).
-    /// ITEM 1 (DIRECT-TO-LIST): hovering the resting square opens the recents list DIRECTLY
-    /// — there is no intermediate elongated pill state, and the grown hit region is live
-    /// IMMEDIATELY (synchronously) even though the window frame animates open.
-    @Test func restingHoverRegionEqualsSquareAndHoverOpensListDirectly() {
+    /// CLICK-TO-OPEN: hovering the resting square does NOT open the list (hover only shows
+    /// the Clawdy cursor); CLICKING opens the recents list DIRECTLY — no intermediate
+    /// elongated pill state — and the grown hit region is live IMMEDIATELY (synchronously)
+    /// even though the window frame animates open.
+    @Test func restingHoverRegionEqualsSquareAndClickOpensListDirectly() {
         let controller = ResearchRecentsBadgeController.offscreenForTesting()
         controller.recentRowsProvider = { [] }
         controller.liveDismissedSessionIDsProvider = { [] }
@@ -458,10 +459,16 @@ struct ResearchRecentsBadgeWindowTests {
         #expect(ResearchRecentsLayout.restingBadgeSize.width == ResearchRecentsLayout.restingBadgeSize.height,
                 "the resting footprint is a square")
 
-        // Hover: opens the LIST directly (no intermediate elongated pill), and the hover hit
+        // Hover at rest: NOT enough to open — the badge stays resting with its square hitbox.
+        controller.setBadgeHoverForTesting(true)
+        #expect(controller.isListOpenForTesting == false,
+                "hovering the resting badge must not open the list; opening is a click")
+        #expect(controller.installedHoverTrackingRectForTesting == restingSquarePillRect)
+
+        // Click: opens the LIST directly (no intermediate elongated pill), and the hover hit
         // region is set to the FINAL grown list rect IMMEDIATELY (no dead zone), even though
         // the window frame animates to full size.
-        controller.setBadgeHoverForTesting(true)
+        controller.toggleListForTesting()
         #expect(controller.isListOpenForTesting == true)
         #expect(controller.installedHoverTrackingRectForTesting == inlineListPillRect,
                 "the grown hover hit region is live immediately, before the frame animation settles")
@@ -471,18 +478,37 @@ struct ResearchRecentsBadgeWindowTests {
 
     /// ITEM 1 INVARIANT (DIRECT OPEN): opening always goes resting → listOpen with NO
     /// intermediate elongated pill — the `.hoverExpanded` state was retired from the enum
-    /// entirely, so both the hover path AND the tap path land straight in `.listOpen`. (The
-    /// removed case can't be referenced here; its structural absence is the strongest proof.)
-    @Test func openingTransitionsRestingToListOpenDirectly() {
-        // Hover path.
+    /// entirely, so the tap path lands straight in `.listOpen`. Hover at rest is inert.
+    /// Once open, the pointer LEAVING the list auto-collapses it after the short grace.
+    @Test func openingTransitionsRestingToListOpenDirectly() async throws {
+        // Hover path: inert at rest.
         let hoverController = ResearchRecentsBadgeController.offscreenForTesting()
         hoverController.recentRowsProvider = { [] }
         hoverController.liveDismissedSessionIDsProvider = { [] }
         hoverController.show()
         #expect(hoverController.visualStateForTesting == .resting)
         hoverController.setBadgeHoverForTesting(true)
-        #expect(hoverController.visualStateForTesting == .listOpen)
+        #expect(hoverController.visualStateForTesting == .resting)
+        hoverController.setBadgeHoverForTesting(false)
+        #expect(hoverController.visualStateForTesting == .resting)
         hoverController.hide()
+
+        // Click opens; pointer leaving the open list auto-collapses it after the grace.
+        let leaveController = ResearchRecentsBadgeController.offscreenForTesting()
+        leaveController.recentRowsProvider = { [] }
+        leaveController.liveDismissedSessionIDsProvider = { [] }
+        leaveController.show()
+        leaveController.toggleListForTesting()
+        #expect(leaveController.visualStateForTesting == .listOpen)
+        leaveController.setBadgeHoverForTesting(true)   // pointer is over the open list
+        leaveController.setBadgeHoverForTesting(false)  // pointer leaves it
+        #expect(leaveController.visualStateForTesting == .listOpen,
+                "leaving never collapses synchronously — there is a short grace")
+        let graceNanoseconds = UInt64((leaveController.listAutoHideGraceSecondsForTesting + 0.25) * 1_000_000_000)
+        try await Task.sleep(nanoseconds: graceNanoseconds)
+        #expect(leaveController.visualStateForTesting == .resting,
+                "after the grace the list auto-collapses back to the resting badge")
+        leaveController.hide()
 
         // Tap path.
         let tapController = ResearchRecentsBadgeController.offscreenForTesting()

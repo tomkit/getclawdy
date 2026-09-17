@@ -27,9 +27,11 @@
 //   • LIST-OPEN: because the badge only ever appears when there are ZERO active toasts,
 //     interacting with the resting square opens the recents list DIRECTLY — it never
 //     first morphs into an intermediate elongated horizontal "View recent runs ›" pill.
-//     Hovering the square (or tapping it) grows the window VERTICALLY (anchored top-left,
-//     so it extends DOWN) into the SAME surface, rendering the top-N recents list INLINE
-//     — no separate list window. Tapping again (or moving away) collapses it back.
+//     CLICKING the square grows the window VERTICALLY (anchored top-left, so it extends
+//     DOWN) into the SAME surface, rendering the top-N recents list INLINE — no separate
+//     list window. Hovering the resting square does NOT open it (hover only shows the
+//     Clawdy cursor); it is an explicit click. Once open, moving the pointer off the list
+//     auto-collapses it after a short grace (menu-style); tapping again also collapses it.
 //
 //  The square→list growth (and the reverse collapse) ANIMATES open — the window frame and
 //  the SwiftUI content morph are INTERPOLATED (respecting Reduce Motion, which falls back
@@ -808,11 +810,11 @@ final class ResearchRecentsBadgeController {
 
     // MARK: - Hover / list interaction
 
-    /// Hover changed on the badge. While RESTING, hovering the square opens the recents
-    /// list DIRECTLY (no intermediate elongated pill) — the badge only ever shows with
-    /// zero active toasts, so there is nothing to disambiguate. While the LIST is open,
-    /// hover only drives the menu-style auto-hide (entering cancels it, leaving schedules
-    /// it) — hover never collapses an intentionally-opened list synchronously.
+    /// Hover changed on the badge. While RESTING, hover does NOTHING to the list — opening
+    /// is an explicit CLICK (`onTapBadge` → `openList()`), so an idle pointer drifting
+    /// across the corner of the screen can't pop the list open. While the LIST is open,
+    /// hover drives the menu-style auto-hide (entering cancels it, leaving schedules it) —
+    /// hover never collapses an intentionally-opened list synchronously.
     private func handleBadgeHover(_ hovering: Bool) {
         switch visualState {
         case .listOpen:
@@ -823,17 +825,16 @@ final class ResearchRecentsBadgeController {
                 scheduleListAutoHide()
             }
         case .resting:
-            // Hovering the resting square opens the list directly; hover-out while resting
-            // is a no-op (the list's own auto-hide handles closing once it is open).
-            if hovering {
-                openList()
-            }
+            // Intentionally a no-op: the resting badge opens on click only. The tracking
+            // area still fires so the Clawdy cursor shows while hovering the square.
+            break
         }
     }
 
     /// Opens the inline recents list (loads fresh rows first) by growing the window
     /// vertically into the same surface, straight from the resting square (no intermediate
-    /// elongated pill). Toggling: tapping while already open collapses it.
+    /// elongated pill). This is the CLICK path — the only way the list opens. Toggling:
+    /// tapping while already open collapses it.
     private func openList() {
         if visualState == .listOpen {
             collapseToResting()
@@ -932,6 +933,8 @@ final class ResearchRecentsBadgeController {
     /// Drives the REAL badge hover path, so a test can prove hovering the resting square
     /// opens the list DIRECTLY and the resting hit region equals the square.
     func setBadgeHoverForTesting(_ hovering: Bool) { handleBadgeHover(hovering) }
+    /// The list's hover-out auto-collapse grace, so a test can wait just past it.
+    var listAutoHideGraceSecondsForTesting: TimeInterval { listAutoHideGraceSeconds }
     /// The TARGET window content size for the current visual state — the size the window
     /// animates TO. Lets a test assert the grown/collapsed geometry synchronously without
     /// waiting on the (now interpolated) frame animation to settle.
