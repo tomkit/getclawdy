@@ -234,6 +234,13 @@ struct BlueCursorView: View {
     /// travel during the bezier flight with ZERO change to the animation math.
     private let clawBaseOrientationOffsetDegrees: Double = 90.0
 
+    /// Where the pincer tip sits relative to the glyph's center at the resting
+    /// orientation, in SwiftUI points (y down). In the 16×16 `CursorClaw` art the tip is
+    /// at pixel (1, 6), i.e. (−7, −2) from the center; the resting rotation (−45° + the
+    /// 90° base offset = +45°) turns that into (−3.5, −6.4). Used so the tip — not the
+    /// glyph center — lands on a pointing target.
+    static let clawTipOffsetFromCenterAtRest = CGPoint(x: -3.5, y: -6.4)
+
     /// Speech bubble text shown when pointing at a detected element.
     @State private var navigationBubbleText: String = ""
     @State private var navigationBubbleOpacity: Double = 0.0
@@ -638,11 +645,13 @@ struct BlueCursorView: View {
         // Convert the AppKit screen location to SwiftUI coordinates for this screen
         let targetInSwiftUI = convertScreenPointToSwiftUICoordinates(screenLocation)
 
-        // Offset the target so the buddy sits beside the element rather than
-        // directly on top of it — 8px to the right, 12px below.
+        // Land the claw's PINCER TIP on the target (the glyph is centered on
+        // `cursorPosition`, so the center sits down-and-right of the element, like the
+        // macOS arrow's hotspot). Before this the center was placed at a hand-tuned
+        // (+8, +12), which left the tip ~7pt down-right of every target.
         let offsetTarget = CGPoint(
-            x: targetInSwiftUI.x + 8,
-            y: targetInSwiftUI.y + 12
+            x: targetInSwiftUI.x - Self.clawTipOffsetFromCenterAtRest.x,
+            y: targetInSwiftUI.y - Self.clawTipOffsetFromCenterAtRest.y
         )
 
         // Clamp target to screen bounds with padding
