@@ -66,6 +66,9 @@ read -p "   Proceed? (y/N) " -n 1 -r; echo ""
 rm -rf "$BUILD_DIR"
 mkdir -p "$EXPORT_DIR" "$DIST_DIR"
 
+# -- 1b. Bundled voice model (git-ignored; downloaded once, checksum-verified) --
+"${PROJECT_DIR}/scripts/fetch-models.sh"
+
 # -- 2. Archive --
 echo "📦 Archiving ${APP_NAME} ${VERSION}..."
 xcodebuild archive \

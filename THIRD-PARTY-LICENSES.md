@@ -10,6 +10,15 @@ retained as required by the respective licenses.
 | Sparkle | 2.9.0 | https://github.com/sparkle-project/Sparkle | MIT |
 | PostHog (posthog-ios) | 3.47.0 | https://github.com/PostHog/posthog-ios | MIT |
 | PLCrashReporter | 1.12.2 | https://github.com/microsoft/plcrashreporter | MIT |
+| ONNX Runtime (onnxruntime-swift-package-manager) | 1.24.2 | https://github.com/microsoft/onnxruntime | MIT |
+| Kokoro-82M (v1.0 ONNX model + voices) | 1.0 | https://huggingface.co/hexgrad/Kokoro-82M | Apache-2.0 |
+| Misaki / MisakiSwift (English G2P; vendored fork in `Packages/ClawdyVoice`) | 1.0.1 | https://github.com/hexgrad/misaki · https://github.com/mlalma/MisakiSwift | Apache-2.0 |
+| MLXUtilsLibrary (`MToken` only, vendored) | 0.0.6 | https://github.com/mlalma/MLXUtilsLibrary | Apache-2.0 |
+
+The built-in voice deliberately uses Misaki for pronunciation rather than espeak-ng
+(GPL-3.0), so the app stays MIT-clean. The Kokoro ONNX model file is downloaded at
+build time by `scripts/fetch-models.sh` from the kokoro-onnx release
+(https://github.com/thewh1teagle/kokoro-onnx, MIT packaging of the Apache-2.0 model).
 
 ---
 
@@ -261,3 +270,55 @@ file are licensed as follows:
     KIND, either express or implied. See the License for the
     specific language governing permissions and limitations
     under the License.
+
+---
+
+## ONNX Runtime 1.24.2
+
+MIT License
+
+Copyright (c) Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## Kokoro-82M 1.0, Misaki, MisakiSwift 1.0.1, MLXUtilsLibrary 0.0.6
+
+Kokoro-82M (hexgrad), Misaki (hexgrad), MisakiSwift (mlalma) and MLXUtilsLibrary
+(mlalma) are licensed under the Apache License, Version 2.0. The full license text
+is in `Packages/ClawdyVoice/LICENSE-MisakiSwift` (identical for all four); the
+package's vendored sources carry their original notices. Modifications to
+MisakiSwift are described in `Packages/ClawdyVoice/README.md`.
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.

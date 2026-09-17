@@ -18,7 +18,7 @@
 
 Hold Control + Option and say what you need. Clawdy looks at your screen, answers you out loud, and the claw flies to whatever it's talking about. It's a conversation: ask a follow-up, and it remembers what you were just talking about.
 
-Clawdy runs on your own local Claude Code or Codex, using your subscription tokens. No account, nothing extra to pay for, and your voice stays on your Mac.
+Clawdy runs on your own local Claude Code or Codex, using your subscription tokens. No account, nothing extra to pay for, and your voice stays on your Mac. The voice it talks back with is built in too (Kokoro, running on your Mac), so nothing you say or hear leaves the machine.
 
 - You talk. Hold the keys and speak. No typing.
 - It sees what you see. Every window, every monitor.
@@ -104,10 +104,11 @@ You need macOS 14.2+ and Xcode 16+. Point the command line tools at it: `sudo xc
 ```bash
 git clone https://github.com/tomkit/getclawdy.git
 cd getclawdy
+./scripts/fetch-models.sh   # downloads the ~90 MB Kokoro voice model into Clawdy/Models/ (once)
 open Clawdy.xcodeproj
 ```
 
-In Xcode, pick the Clawdy scheme and the My Mac destination, set your team under Signing & Capabilities (a personal Apple ID is fine), and press Cmd + R. The app shows up in the menu bar; there's no dock icon or window. First launch asks for Microphone, Speech Recognition, Accessibility, and Screen Recording. Grant them and relaunch. They're tied to the code signature, so a build signed differently will ask again.
+The voice model is too big for git, so the fetch script pulls it from the Kokoro-ONNX release and checks its SHA-256; the Xcode build also runs it, but a fresh clone needs one build after the download for the file to be bundled. In Xcode, pick the Clawdy scheme and the My Mac destination, set your team under Signing & Capabilities (a personal Apple ID is fine), and press Cmd + R. The app shows up in the menu bar; there's no dock icon or window. First launch asks for Microphone, Speech Recognition, Accessibility, and Screen Recording. Grant them and relaunch. They're tied to the code signature, so a build signed differently will ask again.
 
 Tests: Cmd + U, or
 
@@ -135,4 +136,6 @@ What changed in each is in the [changelog](CHANGELOG.md).
 
 ## Credits and license
 
-Clawdy is a fork of [heyclicky](https://heyclicky.com), rebuilt to run on the coding CLI you already have instead of a hosted backend. Clawdy's code is MIT (`LICENSE`); the upstream notice is in `NOTICE`. Bundled third-party components are listed in `THIRD-PARTY-LICENSES.md`.
+Clawdy is a fork of [heyclicky](https://heyclicky.com), rebuilt to run on the coding CLI you already have instead of a hosted backend. Clawdy's code is MIT (`LICENSE`); the upstream notice is in `NOTICE`. The built-in voice is [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) (Apache-2.0) with the [Misaki](https://github.com/hexgrad/misaki) pronunciation engine, via a fork of [MisakiSwift](https://github.com/mlalma/MisakiSwift) in `Packages/ClawdyVoice`, running on ONNX Runtime. Bundled third-party components are listed in `THIRD-PARTY-LICENSES.md`.
+
+To teach the voice a word (a name, a product), add a line to `~/.clawdy/pronunciations.txt`; the file explains the format.

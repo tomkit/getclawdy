@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A built-in voice.** Clawdy now talks back with its own bundled voice (Kokoro, running on your Mac — nothing is sent anywhere) instead of the robotic system voice. Six voices to pick from in the panel; "Heart" is the default. ElevenLabs is still there if you'd rather use your own key. Teach it names and product words in `~/.clawdy/pronunciations.txt`. The download is about 90 MB bigger for it.
 - **Speed settings.** Pick the model and effort for quick answers in the menu bar panel; the control is the same for both engines. Sonnet + low effort is now the default for Claude (about a second faster to the first spoken word than Opus at half the cost, and no multi-second silent think before a longer answer: low effort halved time-to-first-text on substantive questions in testing). For Codex, low effort is about 2× faster than medium.
 - **Instant feedback, all in Clawdy's voice.** The moment you release the keys Clawdy says "mm-hm", and if the answer is taking a while it says "let me look" / "still checking" at sensible intervals. Research runs now say "on it", "your page is ready", and "that one didn't work out" instead of playing system sounds. There are no sound effects, and no two voice outputs ever overlap: a research announcement waits until you and Clawdy are both quiet.
 - Clawdy now uses the best installed macOS voice (Premium or Enhanced, if you've downloaded one) instead of the compact default.
