@@ -88,10 +88,19 @@ final class KokoroTTSClient: NSObject, SpeechTTSProviding {
         return await synthesizerTask?.value
     }
 
-    /// Re-reads `~/.clawdy/pronunciations.txt` (called on each turn — it's a tiny file).
+    /// Re-reads `~/.clawdy/pronunciations.txt` (called on each turn — it's a tiny file) and
+    /// starts a fresh list of guessed words for the turn.
     func reloadPronunciationOverrides() async {
         let overrides = PronunciationOverridesFile.load()
-        await synthesizer()?.setPronunciationOverrides(overrides)
+        guard let synthesizer = await synthesizer() else { return }
+        await synthesizer.setPronunciationOverrides(overrides)
+        await synthesizer.resetGuessedWords()
+    }
+
+    /// Words the lexicon didn't know this turn (pronounced by the fallback network) —
+    /// the candidates for `~/.clawdy/pronunciations.txt`.
+    func guessedWordsThisTurn() async -> [String] {
+        await synthesizer()?.guessedWordsSinceReset ?? []
     }
 
     /// Synthesizes `text` to WAV bytes without playing it (used for the cue cache).

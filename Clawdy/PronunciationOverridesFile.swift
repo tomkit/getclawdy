@@ -26,6 +26,9 @@ enum PronunciationOverridesFile {
     #   cd Packages/ClawdyVoice && swift run g2pdump "your word"
     # Lines starting with # are ignored. Matching is case-insensitive, whole words only.
     #
+    # After a turn, ~/Library/Application Support/Clawdy/debug/last-turn/guessed-words.txt lists the
+    # words the voice had to guess — the ones worth an entry here.
+    #
     # clawdy: klˈɔdi
     # tomkit: tˈɑmkɪt
     """

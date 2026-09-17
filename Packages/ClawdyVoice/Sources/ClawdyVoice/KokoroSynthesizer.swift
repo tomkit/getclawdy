@@ -101,15 +101,37 @@ public actor KokoroSynthesizer {
 
     /// The phonemes Kokoro will be fed for `text` (exposed for tests and tooling).
     public func phonemes(for text: String) -> String {
+        phonemesAndGuessedWords(for: text).phonemes
+    }
+
+    /// Words in `text` the lexicon didn't know, so the fallback network had to guess their
+    /// pronunciation (the ones worth an entry in `~/.clawdy/pronunciations.txt` if they
+    /// sound wrong). Free to collect: it's the rating the G2P already attaches per token.
+    public func guessedWords(in text: String) -> [String] {
+        phonemesAndGuessedWords(for: text).guessedWords
+    }
+
+    private func phonemesAndGuessedWords(for text: String) -> (phonemes: String, guessedWords: [String]) {
         let spoken = normalizer.normalize(text)
         let overrides = Self.builtInPronunciations.merging(pronunciationOverrides) { _, userEntry in userEntry }
         let marked = PronunciationOverrideMarkup.apply(overrides: overrides, to: spoken)
-        return g2p.phonemize(text: marked).0
+        let (phonemes, tokens) = g2p.phonemize(text: marked)
+        let guessed = tokens.filter { $0._.rating == EnglishFallbackNetwork.fallbackRating }
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return (phonemes, guessed)
     }
+
+    /// Words the fallback network guessed across every `synthesize(text:)` call since the
+    /// last `resetGuessedWords()` — the per-turn list the app writes to its debug dump.
+    public private(set) var guessedWordsSinceReset: [String] = []
+
+    public func resetGuessedWords() { guessedWordsSinceReset = [] }
 
     /// Speaks `text` in `voice`; returns mono float32 samples at 24 kHz.
     public func synthesize(text: String, voice: KokoroVoice, speed: Float = 1.0) throws -> [Float] {
-        let phonemes = phonemes(for: text)
+        let (phonemes, guessed) = phonemesAndGuessedWords(for: text)
+        for word in guessed where !guessedWordsSinceReset.contains(word) { guessedWordsSinceReset.append(word) }
         return try synthesize(phonemes: phonemes, voice: voice, speed: speed)
     }
 

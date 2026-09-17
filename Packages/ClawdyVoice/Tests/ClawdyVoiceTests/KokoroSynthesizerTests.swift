@@ -138,6 +138,17 @@ final class KokoroSynthesizerTests: XCTestCase {
         XCTAssertGreaterThan(envelopeCorrelation, 0.99, "envelope correlation with the Python reference: \(envelopeCorrelation)")
     }
 
+    func testGuessedWordsAreTheOnesTheLexiconDidNotKnow() async throws {
+        let synthesizer = try makeSynthesizer()
+        let guessed = await synthesizer.guessedWords(in: "Open Xcode and ask Nakamura about the formula, then ping tomkit.")
+        XCTAssertEqual(guessed, ["Xcode", "Nakamura", "tomkit"])
+        let none = await synthesizer.guessedWords(in: "The quick brown fox jumps over the lazy dog.")
+        XCTAssertEqual(none, [])
+        // Built-in and user overrides are not guesses.
+        let overridden = await synthesizer.guessedWords(in: "hey clawdy")
+        XCTAssertEqual(overridden, [])
+    }
+
     func testTextToSpeechProducesAudioOfPlausibleLength() async throws {
         let synthesizer = try makeSynthesizer()
         let samples = try await synthesizer.synthesize(text: "Hey, I'm Clawdy. Ask me anything on your screen.", voice: .defaultVoice)

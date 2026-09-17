@@ -2288,6 +2288,12 @@ final class CompanionManager: ObservableObject {
                 }
                 voiceState = .idle
                 scheduleTransientHideIfNeeded()
+                // Which words the voice had to guess this turn (free: the G2P's own ratings).
+                let guessedWords = await kokoroTTSClient.guessedWordsThisTurn()
+                TurnDebugDump.writeGuessedWords(guessedWords)
+                if !guessedWords.isEmpty {
+                    TurnLatencyLog.logger.notice("voice guessed pronunciations for: \(guessedWords.joined(separator: ", "), privacy: .public)")
+                }
             }
         }
     }

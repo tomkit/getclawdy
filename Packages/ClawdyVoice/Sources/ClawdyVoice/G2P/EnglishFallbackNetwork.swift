@@ -337,6 +337,9 @@ enum BARTModelError: Error {
 /// same `(phonemes, rating)` call MisakiSwift's MLX version exposed to `EnglishG2P`.
 final class EnglishFallbackNetwork {
     static let unknownTokenId = 3
+    /// The confidence rating the G2P stamps on a token this network pronounced (the
+    /// lexicon uses 3–4; 5 is an explicit override).
+    static let fallbackRating = 1
 
     private let configuration: BARTConfig
     private let model: BARTModel
