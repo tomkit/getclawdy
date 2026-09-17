@@ -56,7 +56,7 @@ struct AcknowledgementCueRendererTests {
 struct SpokenCueArbiterTests {
     @Test func replyTextCancelsPendingFillersAndTurnEndCancelsToo() async throws {
         let arbiter = SpokenCueArbiter(schedule: [
-            .init(delaySeconds: 0, phrases: ["mm-hm."]),
+            .init(delaySeconds: 0, phrases: ["okay."]),
             .init(delaySeconds: 0.05, phrases: ["hmm"]),
             .init(delaySeconds: 5, phrases: ["still checking"])
         ], renderer: AcknowledgementCueRenderer(cacheRootDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("no-cues")))
@@ -77,7 +77,7 @@ struct SpokenCueArbiterTests {
     @Test func turnEndedKeepsThePendingAcknowledgementButDropsFillers() {
         let renderer = AcknowledgementCueRenderer(cacheRootDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("no-cues"))
         let arbiter = SpokenCueArbiter(schedule: [
-            .init(delaySeconds: 1, phrases: ["mm-hm."]),
+            .init(delaySeconds: 1, phrases: ["okay."]),
             .init(delaySeconds: 3, phrases: ["let me look."])
         ], renderer: renderer)
         arbiter.setVoice(.apple(voiceIdentifier: nil))
@@ -92,7 +92,7 @@ struct SpokenCueArbiterTests {
     /// A research hand-off must produce exactly ONE acknowledgement, whichever comes first.
     @Test func researchStartIsSkippedWhenTheTurnWasAlreadyAcknowledgedAndReplacesItOtherwise() {
         let renderer = AcknowledgementCueRenderer(cacheRootDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("no-cues"))
-        let arbiter = SpokenCueArbiter(schedule: [.init(delaySeconds: 5, phrases: ["mm-hm."])], renderer: renderer)
+        let arbiter = SpokenCueArbiter(schedule: [.init(delaySeconds: 5, phrases: ["okay."])], renderer: renderer)
         arbiter.setVoice(.apple(voiceIdentifier: nil))
         arbiter.setReplyOrRecordingActive(true)   // announcements queue, so they're countable
 

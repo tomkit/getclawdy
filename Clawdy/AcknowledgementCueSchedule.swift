@@ -7,9 +7,10 @@
 //  thresholds (≈0.1s: feels instant; ≈1s: flow kept; ≈10s: attention lost). Every cue is
 //  VOICE, in the reply's own voice — never a sound effect:
 //
-//    t ≈ 1s     a micro-acknowledgement ("mm-hm.") — a beat after the keys come up, the
+//    t ≈ 1s     a micro-acknowledgement ("okay.") — a beat after the keys come up, the
 //               way a listener nods after you finish, not the instant you stop; the
-//               pre-rendered clip makes the timing exact
+//               pre-rendered clip makes the timing exact. Real WORDS only: the
+//               interjections ("mm-hm", "hmm") come out garbled from the model.
 //    t ≈ 3s     a short filler ("hmm, let me look.")
 //    t ≈ 8s     a progress line ("still checking.")
 //    t ≈ 15s    a longer-wait line ("this one's taking a bit.")
@@ -31,7 +32,7 @@ enum AcknowledgementCueSchedule {
     }
 
     static let `default`: [Step] = [
-        Step(delaySeconds: 1.0, phrases: ["mm-hm.", "okay.", "got it."]),
+        Step(delaySeconds: 1.0, phrases: ["okay.", "got it.", "sure."]),
         Step(delaySeconds: 3.0, phrases: ["let me look.", "let me check.", "one sec."]),
         Step(delaySeconds: 8.0, phrases: ["still checking.", "still on it.", "almost there."]),
         Step(delaySeconds: 15.0, phrases: ["this one's taking a bit.", "still working on it, hang on."])

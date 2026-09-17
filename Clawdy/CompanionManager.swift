@@ -2306,7 +2306,7 @@ final class CompanionManager: ObservableObject {
     /// queue. Called when the user speaks again so a new utterance never overlaps
     /// the previous one.
     /// Deliberately does NOT touch the spoken cues: this runs at the START of every request
-    /// (right after the keys come up, when "mm-hm" is playing and the fillers are scheduled)
+    /// (right after the keys come up, when "okay" is playing and the fillers are scheduled)
     /// and before a spoken follow-up answer (when a queued "your page is ready" may be
     /// playing). Only a real stop — a re-press or the panel's Stop — cancels cues, and
     /// those call `spokenCues.cancelTurn()` themselves.
