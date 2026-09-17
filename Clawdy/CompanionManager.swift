@@ -1616,7 +1616,7 @@ final class CompanionManager: ObservableObject {
 
     the screenshot images are labeled with their pixel dimensions. use those dimensions as the coordinate space. the origin (0,0) is the top-left corner of the image. x increases rightward, y increases downward.
 
-    format: [POINT:x,y:label] where x,y are integer pixel coordinates in the screenshot's coordinate space, and label is the concise NAME of the thing you're pointing at — the place, landmark, or ui element itself (like "shibuya crossing", "the met", "search bar", or "save button"), 1-3 words. this label is shown on screen next to the cursor as it arrives, so make it the actual name the user would recognize, not a generic phrase. if the element is on the cursor's screen you can omit the screen number. if the element is on a DIFFERENT screen, append :screenN where N is the screen number from the image label (e.g. :screen2). this is important — without the screen number, the cursor will point at the wrong place.
+    format: [POINT:x,y:label] where x,y are integer pixel coordinates in the screenshot image. every screenshot has a RULER along its top and left edges with the pixel numbers printed on it — read x off the top ruler and y off the left ruler (the screen content starts just inside the rulers, so coordinates include that margin), and use the printed numbers to place your point precisely rather than estimating. label is the concise NAME of the thing you're pointing at — the place, landmark, or ui element itself (like "shibuya crossing", "the met", "search bar", or "save button"), 1-3 words. this label is shown on screen next to the cursor as it arrives, so make it the actual name the user would recognize, not a generic phrase. if the element is on the cursor's screen you can omit the screen number. if the element is on a DIFFERENT screen, append :screenN where N is the screen number from the image label (e.g. :screen2). this is important — without the screen number, the cursor will point at the wrong place.
 
     if pointing wouldn't help at all, append [POINT:none].
 
@@ -1657,6 +1657,30 @@ final class CompanionManager: ObservableObject {
     /// question STILL gets a quick spoken answer with a [POINT:...] tag, never a
     /// follow-up. Trivially-quick standalone questions are still answered inline,
     /// and a brand-new go-gather-and-build ask still routes to a skill marker.
+    /// Each stroke's path as coordinates in the RULED image the model sees (a dozen
+    /// points per stroke at most), so the model can point at the marked thing exactly.
+    static func describeAnnotationStrokes(_ strokes: [AnnotationStroke], in capture: CompanionScreenCapture) -> String {
+        let scaleX = CGFloat(capture.screenshotWidthInPixels) / CGFloat(max(capture.displayWidthInPoints, 1))
+        let scaleY = CGFloat(capture.screenshotHeightInPixels) / CGFloat(max(capture.displayHeightInPoints, 1))
+        let lines = strokes.enumerated().compactMap { index, stroke -> String? in
+            guard stroke.points.count >= 2 else { return nil }
+            let sampleStride = max(1, stroke.points.count / 12)
+            var sampled = stride(from: 0, to: stroke.points.count, by: sampleStride).map { stroke.points[$0] }
+            if let last = stroke.points.last, sampled.last != last { sampled.append(last) }
+            let pixels = sampled.map { displayPoint -> String in
+                let contentPixel = CGPoint(
+                    x: displayPoint.x * scaleX,
+                    y: CGFloat(capture.screenshotHeightInPixels) - displayPoint.y * scaleY
+                )
+                let imagePixel = ScreenshotRulers.imagePoint(fromContentPoint: contentPixel)
+                return "(\(Int(imagePixel.x.rounded())),\(Int(imagePixel.y.rounded())))"
+            }
+            return "stroke \(index + 1): " + pixels.joined(separator: " → ")
+        }
+        guard !lines.isEmpty else { return "" }
+        return "the user's strokes, as pixel coordinates in the primary-focus image (x,y): " + lines.joined(separator: "; ") + ". to point at a marked thing, use a coordinate on its stroke."
+    }
+
     /// Rides in the USER message on a turn where the user drew on their screen: the red
     /// strokes in the cursor screen's screenshot are the user's own annotation, and words
     /// like "this", "here", "the one I circled" refer to what they marked.
@@ -1879,7 +1903,7 @@ final class CompanionManager: ObservableObject {
         // cursor screen's screenshot below, and the model has to be TOLD they're the
         // user's marks — otherwise "this road" is a guess over the whole map.
         if !pendingAnnotationStrokes.isEmpty { userPromptAddenda.append(Self.companionAnnotationAddendum) }
-        let effectiveUserPrompt = (userPromptAddenda + [transcript]).joined(separator: "\n\n")
+        var effectiveUserPrompt = (userPromptAddenda + [transcript]).joined(separator: "\n\n")
 
         currentResponseTask = Task {
             // Stay in processing (spinner) state — no streaming text displayed
@@ -1955,6 +1979,9 @@ final class CompanionManager: ObservableObject {
                         lineWidthPx: scaledLineWidthPx,
                         jpegQuality: CompanionScreenCaptureUtility.screenshotJPEGCompressionQuality
                     )
+                    // Spell each stroke's path out in image pixels too, so "point at the
+                    // marked thing" is a lookup rather than a visual estimate.
+                    effectiveUserPrompt += "\n\n" + Self.describeAnnotationStrokes(pendingAnnotationStrokes, in: cursorDisplayCapture)
                     if let compositedImageData {
                         screenCaptures[0] = CompanionScreenCapture(
                             imageData: compositedImageData,
@@ -1981,9 +2008,19 @@ final class CompanionManager: ObservableObject {
                 // Build image labels with the actual screenshot pixel dimensions
                 // so the model's coordinate space matches the image it sees. We
                 // scale from screenshot pixels to display points ourselves.
-                let labeledImages = screenCaptures.map { capture in
-                    let dimensionInfo = " (image dimensions: \(capture.screenshotWidthInPixels)x\(capture.screenshotHeightInPixels) pixels)"
-                    return (data: capture.imageData, label: capture.label + dimensionInfo)
+                // Every image gets the coordinate rulers (outside the content) right before
+                // it is sent; the label reports the RULED dimensions the model answers in.
+                let ruledImages: [ScreenshotRulers.Result] = screenCaptures.map { capture in
+                    (try? ScreenshotRulers.addRulers(
+                        toJPEG: capture.imageData,
+                        contentWidth: capture.screenshotWidthInPixels,
+                        contentHeight: capture.screenshotHeightInPixels,
+                        jpegQuality: CompanionScreenCaptureUtility.screenshotJPEGCompressionQuality
+                    )) ?? ScreenshotRulers.Result(imageData: capture.imageData, widthInPixels: capture.screenshotWidthInPixels, heightInPixels: capture.screenshotHeightInPixels)
+                }
+                let labeledImages = zip(screenCaptures, ruledImages).map { capture, ruled in
+                    let dimensionInfo = " (image dimensions: \(ruled.widthInPixels)x\(ruled.heightInPixels) pixels, including the \(ScreenshotRulers.marginPixels)-pixel rulers on the top and left)"
+                    return (data: ruled.imageData, label: capture.label + dimensionInfo)
                 }
 
                 // Pass conversation history so the engine remembers prior exchanges
@@ -2115,7 +2152,7 @@ final class CompanionManager: ObservableObject {
                     // (bottom-left origin) the blue cursor overlay flies to.
                     let displayFrame = targetScreenCapture.displayFrame
                     let globalLocation = Self.mapScreenshotPointToGlobalScreenLocation(
-                        screenshotPoint: parsedPoint.coordinate,
+                        screenshotPoint: ScreenshotRulers.contentPoint(fromImagePoint: parsedPoint.coordinate),
                         screenshotWidthInPixels: targetScreenCapture.screenshotWidthInPixels,
                         screenshotHeightInPixels: targetScreenCapture.screenshotHeightInPixels,
                         displayWidthInPoints: targetScreenCapture.displayWidthInPoints,
@@ -2134,7 +2171,13 @@ final class CompanionManager: ObservableObject {
                 // Evidence for "the claw landed in the wrong place": the exact images the
                 // model saw, its reply, and every point through each coordinate space.
                 TurnDebugDump.write(
-                    screenCaptures: screenCaptures,
+                    screenCaptures: zip(screenCaptures, ruledImages).map { capture, ruled in
+                        CompanionScreenCapture(
+                            imageData: ruled.imageData, label: capture.label, isCursorScreen: capture.isCursorScreen,
+                            displayWidthInPoints: capture.displayWidthInPoints, displayHeightInPoints: capture.displayHeightInPoints,
+                            displayFrame: capture.displayFrame, screenshotWidthInPixels: ruled.widthInPixels, screenshotHeightInPixels: ruled.heightInPixels
+                        )
+                    },
                     userText: effectiveUserPrompt,
                     replyText: fullResponseText,
                     points: zip(parseResult.points, pointingTargetsWithSpokenPositions).map { parsedPoint, mapped in
