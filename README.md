@@ -1,20 +1,42 @@
 <p align="center">
-  <img src="assets/clawdy-logo.png" width="120" alt="Clawdy" />
+  <img src="assets/clawdy-banner.png" width="720" alt="Clawdy: Your AI, out of its shell. A free AI cursor buddy for your Mac." />
 </p>
 
-<h1 align="center">Clawdy</h1>
+<h1 align="center">Your AI, out of its shell.</h1>
 
-<p align="center"><strong>Hold a key, ask a question, and a little claw points at the answer on your screen.</strong></p>
+<p align="center"><strong>Clawdy is an AI cursor buddy for Mac. It sees your screen, talks back, and points at exactly what it means. In any app.</strong></p>
 
-Clawdy is a free, open-source helper that lives in your Mac's menu bar. Hold **Control + Option**, say what you need, and let go. Clawdy looks at your screen, answers out loud, and flies a little red claw to whatever it's talking about, in any app.
+<p align="center">
+  <a href="https://getclawdy.com">getclawdy.com</a> ·
+  <a href="https://github.com/tomkit/getclawdy/releases/latest/download/Clawdy.dmg">Download for Mac</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
+Hold **Control + Option**, say what you need, and let go. Clawdy looks at your screen, answers out loud, and a little red claw flies to whatever it's talking about.
 
 Clawdy has no AI of its own. It runs on the **Claude Code** or **Codex** you already have installed, so there is nothing new to sign up for and no separate bill. Your voice never leaves your Mac.
+
+1. It lives in your terminal.
+2. Clawdy lets it out.
+3. Now it rides along with your cursor and points.
 
 <p align="center">
   <a href="https://github.com/tomkit/getclawdy/releases/latest/download/Clawdy.dmg">
     <img src="assets/download-mac.png" width="230" alt="Download Clawdy for macOS" />
   </a>
 </p>
+
+## Hold a key. Say the thing you'd say anyway.
+
+| You say | Clawdy does |
+|---|---|
+| **"What did I just break?"** (at 11:40pm) | Reads the dialog you've been staring at. *"Nothing's lost. Click Revert to Saved, that one."* The claw is already on it. |
+| **"Which of these do I actually need on?"** (in System Settings) | Twelve toggles, zero explanation. Clawdy circles one. *"Just this one. Leave the rest off."* |
+| **"I have no idea what this box wants."** (on a government website) | Reads the whole form, not just the box. *"That's your adjusted gross income. It's line 11 on last year's return."* |
+| **"What do they actually want from me?"** (six paragraphs deep) | Skips the pleasantries and highlights one sentence. *"The invoice, by Friday. Everything else is padding."* |
+| **"Find me three laptops under $900 and put it on one page."** (with 14 tabs open) | Big ask, so it goes and does it: reads the web, builds the comparison with pictures and prices, opens it on your screen. *"Done. The middle one, if you want my pick."* |
+
+Any window, any app, every monitor. If you can see it, Clawdy can see it.
 
 ## What it looks like
 
@@ -29,19 +51,6 @@ Clawdy has no AI of its own. It runs on the **Claude Code** or **Codex** you alr
 **Circle something.** Draw on the screen while you talk and Clawdy sees the circle too.
 
 ![Clawdy pointing out places of interest in Aomori](assets/demo-poi.gif)
-
-## Things you can ask
-
-- "Which of these settings should I turn on?"
-- "What does this error mean and what do I click?"
-- "Walk me through filling out this form."
-- "Explain this chart to me."
-- "What's wrong with this spreadsheet formula?"
-- "Read this email and tell me what they actually want."
-- "Where's the export button in this app?"
-- "Compare these three products and put together a page for me."
-
-Any window, any app, both monitors. If you can see it, Clawdy can see it.
 
 ## Get started
 
@@ -58,7 +67,7 @@ Optional: add an [ElevenLabs](https://elevenlabs.io) key in the menu-bar panel f
 
 ## For the technically curious
 
-**It's your CLI, your tokens.** Clawdy shells out to the `claude` or `codex` binary on your machine. Every answer is billed to the subscription that CLI is signed into. There are no model API keys, no proxy, and nothing sensitive in the app. Because it drives the same underlying session, you can hand a conversation off and **resume it in the terminal** (`claude --resume`, `codex resume`) whenever you want.
+**It's your CLI, your tokens.** Clawdy shells out to the `claude` or `codex` binary on your machine. Every answer is billed to the subscription that CLI is signed into. There are no model API keys, no proxy, and no backend. Because it drives the same underlying session, you can hand a conversation off and **resume it in the terminal** (`claude --resume`, `codex resume`) whenever you want.
 
 **Your own setup comes along.** By default Clawdy runs `claude` without `--safe-mode`, so your CLAUDE.md, skills, plugins, hooks, and MCP servers all load, the same as in your terminal. Turn "Use my Claude Code setup" off in the panel to isolate it.
 
@@ -84,6 +93,8 @@ open Clawdy.xcodeproj
 ```
 
 Select the `Clawdy` scheme, set your signing team under Signing & Capabilities, and hit **Cmd + R**. The app appears in your menu bar (no dock icon).
+
+The landing page lives in [`site/`](site/) (static HTML, deployed to [getclawdy.com](https://getclawdy.com) on every push to `main`).
 
 ## Credits and license
 
