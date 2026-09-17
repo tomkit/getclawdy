@@ -11,9 +11,11 @@
 //      log show --predicate 'subsystem == "com.clawdy.Clawdy" AND category == "latency"' --last 10m --style compact
 //
 //  Stages, in order: `ptt-released` → `transcript-ready` (says whether the recognizer's
-//  final result arrived or the fallback timer fired) → `request-sent` (screenshots
-//  attached, NDJSON written) → `first-text` (first streamed token) → `first-audio`
-//  (TTS playback started) → `result` (full reply). Plus `warm-spawn` whenever the warm
+//  final result arrived or the fallback timer fired) → `capture-ready` (screenshots
+//  encoded; hoisted at press or captured now) → `request-sent` (NDJSON written) →
+//  `first-text` (first streamed token) → `first-sentence` (first complete sentence handed
+//  to TTS) → `tts-requested` (synthesis started) → `first-audio` (playback started) →
+//  `result` (full reply). Plus `warm-spawn` whenever the warm
 //  `claude` process is (re)started, with the reason, since a cold spawn on a turn is
 //  the single biggest avoidable cost.
 //
@@ -28,17 +30,39 @@ final class TurnLatencyLog {
     private var turnStart: Date?
     private var hasLoggedFirstText = false
     private var hasLoggedFirstAudio = false
+    private var hasLoggedFirstSentence = false
+    private var hasLoggedTTSRequest = false
 
     /// Marks push-to-talk release as t=0 for this turn.
     func beginTurn() {
         turnStart = Date()
         hasLoggedFirstText = false
         hasLoggedFirstAudio = false
+        hasLoggedFirstSentence = false
+        hasLoggedTTSRequest = false
         Self.logger.notice("ptt-released t=0.00s")
     }
 
     func transcriptReady(viaFallback: Bool, characterCount: Int) {
         mark("transcript-ready", detail: "via=\(viaFallback ? "fallback-timer" : "final-result") chars=\(characterCount)")
+    }
+
+    func captureReady(imageCount: Int, totalBytes: Int, reused: Bool) {
+        mark("capture-ready", detail: "images=\(imageCount) bytes=\(totalBytes) source=\(reused ? "hoisted-at-press" : "captured-now")")
+    }
+
+    /// The first complete sentence left the model and was handed to TTS.
+    func firstSentence(characterCount: Int) {
+        guard !hasLoggedFirstSentence else { return }
+        hasLoggedFirstSentence = true
+        mark("first-sentence", detail: "chars=\(characterCount)")
+    }
+
+    /// TTS synthesis was requested for the first clip (Apple: local; ElevenLabs: network).
+    func ttsRequested(provider: String) {
+        guard !hasLoggedTTSRequest else { return }
+        hasLoggedTTSRequest = true
+        mark("tts-requested", detail: "provider=\(provider)")
     }
 
     func requestSent(imageCount: Int, systemPromptCharacterCount: Int, historyExchangeCount: Int) {

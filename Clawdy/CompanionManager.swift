@@ -1796,6 +1796,11 @@ final class CompanionManager: ObservableObject {
                 case .captureFresh:
                     screenCaptures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
                 }
+                turnLatencyLog.captureReady(
+                    imageCount: screenCaptures.count,
+                    totalBytes: screenCaptures.reduce(0) { $0 + $1.imageData.count },
+                    reused: reusableCapture != nil
+                )
 
                 guard !Task.isCancelled else {
                     // Cancelled before we could composite — guaranteed teardown so the
@@ -1893,6 +1898,7 @@ final class CompanionManager: ObservableObject {
                         self?.recordSpokenClipForAudioSync(clipReport)
                     }
                 )
+                responseSpeaker.latencyLog = turnLatencyLog
                 currentSentenceBuffer = sentenceBuffer
                 currentResponseSpeaker = responseSpeaker
 
@@ -2135,6 +2141,7 @@ final class CompanionManager: ObservableObject {
         guard let sentenceBuffer = currentSentenceBuffer,
               let responseSpeaker = currentResponseSpeaker else { return }
         for sentence in sentenceBuffer.consumeAccumulatedText(accumulatedText) {
+            turnLatencyLog.firstSentence(characterCount: sentence.count)
             responseSpeaker.enqueueSentence(sentence)
         }
     }

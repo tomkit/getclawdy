@@ -64,6 +64,8 @@ final class StreamingResponseSpeaker {
     /// Called once, the moment the very first audio starts playing, so the UI can
     /// flip out of the spinner/processing state.
     private let onPlaybackStarted: @MainActor () -> Void
+    /// Optional per-turn latency marks (set by the manager for the turn in flight).
+    var latencyLog: TurnLatencyLog?
 
     /// Called each time an ElevenLabs clip's audio STARTS, carrying that clip's timing so
     /// the manager can schedule audio-synced cursor advances against it. nil (default) for
@@ -220,6 +222,7 @@ final class StreamingResponseSpeaker {
                 // alignment + playhead. TRAP 2: report it tagged with THIS clip's ordinal
                 // and text, so the manager syncs each POINT to the word within the SAME
                 // clip's own (zero-based) timeline — never a global one.
+                latencyLog?.ttsRequested(provider: "elevenlabs")
                 let clipTiming = try await elevenLabsTTSClient.speakTextReportingTiming(text)
                 markPlaybackStartedIfNeeded()
                 if let elevenLabsClipOrdinal {
@@ -238,6 +241,7 @@ final class StreamingResponseSpeaker {
         }
 
         do {
+            latencyLog?.ttsRequested(provider: "apple")
             try await appleTTSClient.speakText(text)
             markPlaybackStartedIfNeeded()
             // BLOCKER 3: if this was an ElevenLabs-intended clip that fell back to Apple,
