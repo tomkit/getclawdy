@@ -57,6 +57,9 @@ final class ResearchSession {
     /// The task this run is researching, shown (truncated) as the pill title and used
     /// as the results-window title.
     let taskDescription: String
+    /// The action this run executes (built-in research unless the router chose a
+    /// user-defined one). Handed to the engine via `adoptAction` before any phase runs.
+    let action: ClawdyAction
 
     private(set) var state: State = .idle
 
@@ -187,6 +190,7 @@ final class ResearchSession {
     init(
         sessionID: ResearchSessionID,
         taskDescription: String,
+        action: ClawdyAction = .builtInResearch,
         resolveEngineSelection: @escaping () -> ResearchEngineSelection?,
         makeEngine: @escaping (CoachEngineKind, String) -> ResearchEngine = { _, binaryPath in
             ClaudeResearchEngine(binaryPath: binaryPath)
@@ -199,6 +203,7 @@ final class ResearchSession {
     ) {
         self.sessionID = sessionID
         self.taskDescription = taskDescription
+        self.action = action
         self.resolveEngineSelection = resolveEngineSelection
         self.makeEngine = makeEngine
         self.applicationSupportDirectory = applicationSupportDirectory
@@ -232,6 +237,9 @@ final class ResearchSession {
         // session id; Codex keys the dir by the client run id and has no transcript path
         // until its thread id is known).
         let engine = makeEngine(engineSelection.kind, engineSelection.binaryPath)
+        // Hand the engine the action BEFORE any phase runs so its prompts, tool allowlist
+        // and deliverable name are the action's (a no-op for engines with fixed prompts).
+        engine.adoptAction(action)
 
         let outputDirectory: URL
         do {
@@ -268,7 +276,8 @@ final class ResearchSession {
             task: taskDescription,
             workingDir: outputDirectory.path,
             transcriptPath: resolvedTranscriptPath ?? "",
-            engineKind: engineSelection.kind
+            engineKind: engineSelection.kind,
+            actionID: action.id
         )
 
         // The directive was accepted and a run is committed — play the acknowledge

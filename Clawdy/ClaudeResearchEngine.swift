@@ -88,10 +88,18 @@ final class ClaudeResearchEngine: ResearchEngine {
     /// minutes, so it gets a much larger ceiling. Both are hard limits enforced by
     /// CLIProcessRunner (the child is terminated when they elapse).
     private let planPhaseTimeoutSeconds: TimeInterval
-    private let executePhaseTimeoutSeconds: TimeInterval
+    private var executePhaseTimeoutSeconds: TimeInterval
     /// Hard cost ceiling passed to the CLI as `--max-budget-usd` for the execute
     /// phase, so a runaway tool-using run can't spend unbounded subscription quota.
-    private let maxBudgetUSD: Double
+    private var maxBudgetUSD: Double
+    /// The ACTION this engine runs: its prompts, tool allowlist and deliverable name.
+    /// Defaults to the built-in research action (byte-identical to the pre-actions
+    /// research prompts); `adoptAction` swaps in a user-defined or user-edited one.
+    private(set) var action: ClawdyAction = .builtInResearch
+    /// The task the plan phase was started with, kept so the execute phase can fill the
+    /// action's `{{task}}` placeholder (the resumed `claude` session already has it in
+    /// context; this is only for prompt templating).
+    private var currentTask: String = ""
     /// Mirrors the single app-wide "Use my Claude Code setup" setting (default true).
     /// true → the user's `claude` customizations (CLAUDE.md, skills, MCP, hooks) load
     /// on both research phases; false → `--safe-mode` is added to isolate the run.
@@ -127,33 +135,28 @@ final class ClaudeResearchEngine: ResearchEngine {
         self.makeImageDownloader = makeImageDownloader
     }
 
-    // MARK: - System prompts
+    /// Adopts a (user-defined or user-edited) action for this run. Prompts, the tool
+    /// allowlist and the deliverable name always follow the action. The numeric knobs
+    /// (execute timeout, budget) follow it too UNLESS the action is exactly the built-in
+    /// research definition — that one's numbers are already the engine's construction
+    /// defaults, so an explicitly-injected timeout/budget (tests, callers) is respected.
+    func adoptAction(_ adoptedAction: ClawdyAction) {
+        action = adoptedAction
+        if adoptedAction != .builtInResearch {
+            executePhaseTimeoutSeconds = adoptedAction.executeTimeoutSeconds
+            maxBudgetUSD = adoptedAction.maxBudgetUSD
+        }
+    }
 
-    static let planSystemPrompt = """
-    you are clawdy's research agent, in its PLANNING phase. the user asked for something that needs deep, multi-source web research that ends in a single self-contained HTML page. you are in plan mode and cannot run tools yet.
+    // MARK: - System prompts (the built-in research action's; see ClawdyAction)
 
-    decide whether you genuinely need clarifying information to produce a great result. if and only if essential details are missing, ask at MOST 3 short, specific clarifying questions, then stop and end your turn. if the request is already clear enough, do NOT ask any questions — instead briefly state the plan you'll execute. never ask more than once. either way, END YOUR TURN NOW — do not wait on anything.
+    static var planSystemPrompt: String { ClawdyAction.builtInResearch.planSystemPrompt }
+    static var executeSystemPrompt: String { ClawdyAction.builtInResearch.executeSystemPrompt }
+    static var followUpSystemPrompt: String { ClawdyAction.builtInResearch.followUpSystemPrompt }
 
-    CRITICAL EXECUTION MODEL: in the upcoming execution phase you will do ALL of the research YOURSELF, inline, in a single one-shot turn, using ONLY the WebSearch, WebFetch and Write tools. there is NO background job system here and NO notification will ever arrive. so DO NOT plan to invoke, launch, or delegate to any background task, skill, workflow, agent, sub-agent, task queue, or the deep-research skill / Workflow plugin — those never resume in this mode and would hang forever. your plan must be to perform the searches directly and write the HTML yourself. do NOT end your turn saying you'll wait to be notified about a background job.
-    """
-
-    static let executeSystemPrompt = """
-    you are clawdy's research agent, in its EXECUTION phase. research the task thoroughly using WebSearch and WebFetch, then produce ONE self-contained HTML page and Write it to a file named report.html in the working output directory you've been granted.
-
-    DO ALL OF THIS YOURSELF, INLINE, IN THIS ONE TURN, using ONLY the WebSearch, WebFetch and Write tools. this is a one-shot run with NO background job system and NO notification will ever arrive — anything you hand off never comes back. so DO NOT invoke, launch, spawn, or delegate to any background task, skill, workflow, agent, sub-agent, task queue, or the deep-research skill / Workflow plugin, and DO NOT end your turn waiting to be notified that a background job finished. if you notice yourself about to launch a background workflow or skill, STOP and instead perform the WebSearch/WebFetch calls directly and Write the HTML now, in this turn.
-
-    the HTML MUST keep all of its OWN code inline so it renders with no local dependencies: inline <style> only, no external stylesheet links, no external script src, no CDN references, no remote fonts. the ONE exception is images: when the task is about photos or images, you SHOULD embed the real images you found via <img src="https://..."> pointing at the actual remote image URLs you discovered while researching — that's how the user sees them. use genuine image URLs from your research, not placeholders, and NEVER fabricate or guess an image URL. prefer DIRECT image-file URLs (ones ending in .jpg/.jpeg/.png/.webp/.gif or that clearly serve the raw image file) taken straight from your search results or well-known sources. prefer canonical, original-resolution image URLs and do NOT guess or construct sized thumbnail paths (e.g. never fabricate Wikimedia /thumb/.../NNNpx- variants). do NOT WebFetch, open, or otherwise verify image URLs before embedding them — WebFetch on a raw image binary just fails and wastes a tool call; embed the image URL directly. broken or unreachable images are handled automatically after the page is written (they're swapped for a clean placeholder), so never spend tool calls checking images. reserve WebFetch for reading actual page/article content, not images. everything else stays inline. make it clean, readable, and well organized with clear headings. give the page a subtle OpenClaw red brand accent (#E5342B): use it for headings, links, and small primary accents like rules or key highlights, and optionally a very light red background tint — keep it tasteful and restrained, keep body text high-contrast and readable, and never tint photos/images or force red where it hurts legibility. do not write any file other than report.html. when you're done, briefly confirm in your final message.
-    """
-
-    static let followUpSystemPrompt = """
-    you are clawdy's research agent, continuing a FINISHED research session by voice. the self-contained report.html you already produced is in your context. the user is asking a spoken follow-up. only modify the page if the user explicitly asks you to change it; otherwise just answer their question and write nothing. if you do edit, rewrite the SAME report.html in place (inline <style> only, no external script src, no CDN or remote font references; a remote <img src="https://…"> is allowed for image tasks). end your turn with a concise 1-2 sentence spoken answer or confirmation suitable to read aloud — never read long tool logs or file contents aloud.
-
-    DO ALL OF THIS YOURSELF, INLINE, IN THIS ONE TURN, using ONLY the WebSearch, WebFetch and Write tools. this is a one-shot run with NO background job system and NO notification will ever arrive — anything you hand off never comes back. so DO NOT invoke, launch, spawn, or delegate to any background task, skill, workflow, agent, sub-agent, task queue, or the deep-research skill / Workflow plugin, and DO NOT end your turn waiting to be notified that a background job finished. if you notice yourself about to launch a background workflow or skill, STOP and instead perform the WebSearch/WebFetch calls directly and Write the HTML now, in this turn.
-    """
-
-    /// The deterministic deliverable filename the execute prompt instructs the
-    /// model to write. Used to locate the produced page afterward.
-    static let deliverableFileName = "report.html"
+    /// The deterministic deliverable filename the built-in research action's execute
+    /// prompt instructs the model to write. Instances use their action's own name.
+    static var deliverableFileName: String { ClawdyAction.builtInResearch.deliverableFileName }
 
     // MARK: - Stable per-session output directory (durable, never $HOME)
 
@@ -270,10 +273,11 @@ final class ClaudeResearchEngine: ResearchEngine {
         outputDirectory: URL,
         onProgress: @escaping @MainActor @Sendable (ResearchProgressEvent) -> Void
     ) async throws -> PlanPhaseResult {
+        currentTask = task
         let arguments = ResearchArguments.makePlanArguments(
             task: task,
             sessionID: sessionID,
-            systemPrompt: Self.planSystemPrompt,
+            systemPrompt: action.planSystemPrompt,
             useClaudeCustomizations: useClaudeCustomizations
         )
         let accumulator = ResearchStreamAccumulator()
@@ -320,18 +324,26 @@ final class ClaudeResearchEngine: ResearchEngine {
     ) async throws -> URL {
         // The absolute deliverable path, so discovery is unambiguous regardless of
         // the model's working directory.
-        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(Self.deliverableFileName).path
+        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(action.deliverableFileName).path
         let userMessage = Self.composeExecuteUserMessage(
             outputFileAbsolutePath: deliverableAbsolutePath,
-            clarificationAnswers: clarificationAnswers
+            clarificationAnswers: clarificationAnswers,
+            template: ClawdyAction.render(
+                action.executeMessageTemplate,
+                task: currentTask, outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path
+            )
         )
         let arguments = ResearchArguments.makeExecuteArguments(
             sessionID: sessionID,
             outputDirectoryPath: outputDirectory.path,
             maxBudgetUSD: maxBudgetUSD,
             userMessage: userMessage,
-            systemPrompt: Self.executeSystemPrompt,
-            useClaudeCustomizations: useClaudeCustomizations
+            systemPrompt: ClawdyAction.render(
+                action.executeSystemPrompt,
+                task: currentTask, outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path
+            ),
+            useClaudeCustomizations: useClaudeCustomizations,
+            allowedTools: action.tools
         )
         let accumulator = ResearchStreamAccumulator()
 
@@ -353,7 +365,7 @@ final class ClaudeResearchEngine: ResearchEngine {
         guard runResult.exitCode == 0 else {
             throw ResearchError.phaseFailed(standardError: runResult.standardError)
         }
-        guard let deliverableURL = Self.locateDeliverable(in: outputDirectory) else {
+        guard let deliverableURL = Self.locateDeliverable(in: outputDirectory, deliverableFileName: action.deliverableFileName) else {
             throw ResearchError.noDeliverableProduced
         }
         // DETERMINISTIC image-localization pass: before the page is ever shown, fetch
@@ -404,12 +416,16 @@ final class ClaudeResearchEngine: ResearchEngine {
         followUpPrompt: String,
         onProgress: @escaping @MainActor @Sendable (ResearchProgressEvent) -> Void
     ) async throws -> FollowUpPhaseResult {
-        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(Self.deliverableFileName).path
+        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(action.deliverableFileName).path
         let modificationDateBeforeTurn = Self.deliverableModificationDate(atPath: deliverableAbsolutePath)
 
         let userMessage = Self.composeFollowUpUserMessage(
             spokenFollowUp: followUpPrompt,
-            outputFileAbsolutePath: deliverableAbsolutePath
+            outputFileAbsolutePath: deliverableAbsolutePath,
+            template: ClawdyAction.render(
+                action.followUpMessageTemplate,
+                task: "", outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path
+            )
         )
         // The SAME execute-phase arg vector — only the user message and system prompt
         // differ (the spoken follow-up instead of the fixed "proceed" instruction).
@@ -418,8 +434,12 @@ final class ClaudeResearchEngine: ResearchEngine {
             outputDirectoryPath: outputDirectory.path,
             maxBudgetUSD: maxBudgetUSD,
             userMessage: userMessage,
-            systemPrompt: Self.followUpSystemPrompt,
-            useClaudeCustomizations: useClaudeCustomizations
+            systemPrompt: ClawdyAction.render(
+                action.followUpSystemPrompt,
+                task: "", outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path
+            ),
+            useClaudeCustomizations: useClaudeCustomizations,
+            allowedTools: action.tools
         )
         let accumulator = ResearchStreamAccumulator()
 
@@ -459,7 +479,7 @@ final class ClaudeResearchEngine: ResearchEngine {
         return FollowUpPhaseResult(
             spokenAnswer: accumulator.lastResultText,
             deliverableWasRewritten: deliverableWasRewritten,
-            deliverableURL: Self.locateDeliverable(in: outputDirectory)
+            deliverableURL: Self.locateDeliverable(in: outputDirectory, deliverableFileName: action.deliverableFileName)
         )
     }
 
@@ -470,12 +490,14 @@ final class ClaudeResearchEngine: ResearchEngine {
     /// for a short spoken answer/confirmation so TTS never reads long tool logs aloud.
     static func composeFollowUpUserMessage(
         spokenFollowUp: String,
-        outputFileAbsolutePath: String
+        outputFileAbsolutePath: String,
+        template: String? = nil
     ) -> String {
         let trimmedFollowUp = spokenFollowUp.trimmingCharacters(in: .whitespacesAndNewlines)
-        let instructions = """
-        the research page you produced is at \(outputFileAbsolutePath). only modify the page if I asked you to change it; otherwise just answer my question and write nothing. if you DO change it, rewrite that same report.html in place. keep it short: end with a 1-2 sentence spoken summary/answer suitable to read aloud, and don't read long tool output or file contents aloud.
-        """
+        let instructions = template ?? ClawdyAction.render(
+            ClawdyAction.builtInResearch.followUpMessageTemplate,
+            task: "", outputPath: outputFileAbsolutePath, outputDir: (outputFileAbsolutePath as NSString).deletingLastPathComponent
+        )
         if trimmedFollowUp.isEmpty {
             return instructions
         }
@@ -513,11 +535,13 @@ final class ClaudeResearchEngine: ResearchEngine {
     /// of the working directory). The user's clarifying answers (if any) lead.
     static func composeExecuteUserMessage(
         outputFileAbsolutePath: String,
-        clarificationAnswers: String?
+        clarificationAnswers: String?,
+        template: String? = nil
     ) -> String {
-        let executeInstructions = """
-        proceed with the research now, yourself, inline, in THIS one turn, using ONLY the WebSearch, WebFetch and Write tools. this is a one-shot run: there is NO background job system and NO notification will ever arrive, so DO NOT invoke, launch, or delegate to any background task, skill, workflow, agent, sub-agent, or the deep-research skill / Workflow plugin, and DO NOT end your turn waiting to be notified about a background job — if you catch yourself about to launch one, instead run the searches directly and write the HTML now. use WebSearch and WebFetch to research the task thoroughly, then write ONE self-contained HTML page to the absolute path \(outputFileAbsolutePath). the page MUST keep all of its OWN code inline: inline <style> only, no external stylesheet links, no external script src, no CDN or remote font references. the ONE exception is images — when the task is about photos or images, embed the real images you found via <img src="https://..."> using the actual remote image URLs you discovered while researching (genuine URLs, not placeholders), so the user can actually see them. NEVER fabricate or guess an image URL: prefer DIRECT image-file URLs (ending in .jpg/.jpeg/.png/.webp/.gif or that clearly serve the raw image) taken straight from your search results or well-known sources. prefer canonical, original-resolution image URLs and do NOT guess or construct sized thumbnail paths (e.g. never fabricate Wikimedia /thumb/.../NNNpx- variants). do NOT WebFetch, open, or otherwise verify image URLs before embedding them — WebFetch on a raw image binary just fails and wastes a tool call; embed the image URL directly. broken or unreachable images are handled automatically after the page is written (they're swapped for a clean placeholder), so never spend tool calls checking images. reserve WebFetch for reading actual page/article content, not images. everything else stays inline. give the page a subtle OpenClaw red brand accent (#E5342B): use it for headings, links, and small primary accents, and optionally a very light red background tint — keep it tasteful, keep body text high-contrast and readable, and never tint photos/images or force red where it hurts legibility. do not write any file other than that one report.html. when you're done, briefly confirm.
-        """
+        let executeInstructions = template ?? ClawdyAction.render(
+            ClawdyAction.builtInResearch.executeMessageTemplate,
+            task: "", outputPath: outputFileAbsolutePath, outputDir: (outputFileAbsolutePath as NSString).deletingLastPathComponent
+        )
         if let answers = clarificationAnswers?.trimmingCharacters(in: .whitespacesAndNewlines), !answers.isEmpty {
             return answers + "\n\n" + executeInstructions
         }
@@ -526,7 +550,7 @@ final class ClaudeResearchEngine: ResearchEngine {
 
     /// Finds the produced HTML deliverable in the output directory: the expected
     /// report.html if present, otherwise the most recently modified .html file.
-    static func locateDeliverable(in outputDirectory: URL) -> URL? {
+    static func locateDeliverable(in outputDirectory: URL, deliverableFileName: String = ClawdyAction.builtInResearch.deliverableFileName) -> URL? {
         let expected = outputDirectory.appendingPathComponent(deliverableFileName)
         if FileManager.default.fileExists(atPath: expected.path) {
             return expected

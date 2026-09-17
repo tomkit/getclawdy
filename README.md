@@ -63,6 +63,7 @@ Optional: add an [ElevenLabs](https://elevenlabs.io) key in the menu-bar panel f
 - **Your CLI, your tokens.** Clawdy shells out to the `claude` or `codex` binary on your machine. Every answer is billed to the subscription that CLI is signed into. No API keys, no proxy, no backend.
 - **Your whole setup comes along.** Clawdy runs your CLI as-is, so the CLAUDE.md, skills, plugins, hooks, and MCP servers you've configured in your harness all load, exactly as they do in your terminal.
 - **Pick it up in the shell whenever you want.** Clawdy drives a real CLI session, so you can resume any conversation in the terminal with `claude --resume <id>` or `codex resume <id>` (there's a "Resume in Terminal" button in the History window).
+- **Teach it new actions.** The routing rules and the research prompts live in plain files under `~/.clawdy/actions/`. Edit `research/ACTION.md` to retune research, or add `<name>/ACTION.md` (a tag, a "when to use this" section, and what to do) to give Clawdy a new long-running job. Changes apply on your next question. The README in that folder has the format.
 
 ## Build from source
 

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-09-16
+
+### Added
+- **Teach Clawdy new actions.** The warm agent's routing rules and the research prompts are now plain, editable files in `~/.clawdy/actions/`. The built-in `research/ACTION.md` is written there on first launch (edit it to retune research); add `<name>/ACTION.md` with a `tag`, a `## when` section and a `## execute-message` to give Clawdy a new long-running job that runs in its own agent and opens a page. Edits apply on the next question, no relaunch.
+
+### Changed
+- **The idle claw badge opens on click, not hover.** Hovering the resting badge no longer pops the recents list open; click it. Once open, moving the pointer off it still auto-collapses it.
+- New landing page at [getclawdy.com](https://getclawdy.com) and a simpler README.
+
+### Fixed
+- The system prompt and docs described the claw cursor as blue; it has been red since the brand change.
+
 ## [0.0.2] - 2026-07-10
 
 ### Added

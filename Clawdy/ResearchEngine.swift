@@ -102,6 +102,13 @@ protocol ResearchEngine: AnyObject {
     /// captured its own handle during the run never needs it.
     func adoptResumeHandle(_ resumeHandle: String)
 
+    /// Hands the engine the ACTION this run executes (the built-in research action or
+    /// a user-defined/edited one from `~/.clawdy/actions`): its prompts, tool allowlist,
+    /// deliverable name and numeric knobs. Called by `ResearchSession` right after the
+    /// engine is built, before any phase runs. The default is a no-op so a test fake or
+    /// an engine with fixed prompts is unaffected.
+    func adoptAction(_ action: ClawdyAction)
+
     /// Creates (if needed) and returns the STABLE, durable per-session working
     /// directory this engine's run executes in and writes its deliverable to.
     /// Promoted to the protocol in Stage 3 so each engine owns its OWN directory
@@ -158,4 +165,8 @@ extension ResearchEngine {
     /// it a protocol REQUIREMENT above ensures Codex's override is dispatched through the
     /// `ResearchEngine` existential the manager holds when reconstructing a finished run.
     func adoptResumeHandle(_ resumeHandle: String) {}
+}
+
+extension ResearchEngine {
+    func adoptAction(_ action: ClawdyAction) {}
 }

@@ -59,7 +59,7 @@ enum ImageDownloadOutcome: Sendable, Equatable {
 
 /// The injectable fetch seam. Production is `URLSessionImageDownloader`; tests
 /// inject a deterministic fake keyed by URL so no real network is used.
-protocol ImageURLDownloading: Sendable {
+nonisolated protocol ImageURLDownloading: Sendable {
     func downloadImage(from imageURL: URL) async -> ImageDownloadOutcome
 }
 

@@ -73,7 +73,10 @@ final class CodexResearchEngine: ResearchEngine {
     /// Wall-clock cap for the single execute turn (and each follow-up turn). This is the
     /// ONLY spend bound Codex offers — there is no `--max-budget-usd`. Enforced by
     /// CLIProcessRunner, which terminates the child when it elapses.
-    private let executePhaseTimeoutSeconds: TimeInterval
+    private var executePhaseTimeoutSeconds: TimeInterval
+    /// The ACTION this engine runs (prompts + deliverable name). Defaults to the built-in
+    /// research action; `adoptAction` swaps in a user-defined or user-edited one.
+    private(set) var action: ClawdyAction = .builtInResearch
     /// The manifest index the captured Codex `thread_id` is PERSISTED to the moment the
     /// execute turn discovers it — so the resume handle survives app relaunch instead of
     /// living only in this engine's memory (the gap that blocked Codex reconstruction /
@@ -155,9 +158,20 @@ final class CodexResearchEngine: ResearchEngine {
         self.makeImageDownloader = makeImageDownloader
     }
 
-    /// The deterministic deliverable filename the execute prompt instructs Codex to
-    /// write. Used to locate the produced page afterward.
-    static let deliverableFileName = "report.html"
+    /// Adopts a (user-defined or user-edited) action for this run. The prompts and the
+    /// deliverable name always follow the action; the execute timeout follows it unless
+    /// the action is exactly the built-in research definition (whose timeout is already
+    /// the construction default, so an explicitly-injected one is respected). Codex has
+    /// no `--max-budget-usd`, so the action's budget is not applied here.
+    func adoptAction(_ adoptedAction: ClawdyAction) {
+        action = adoptedAction
+        if adoptedAction != .builtInResearch {
+            executePhaseTimeoutSeconds = adoptedAction.executeTimeoutSeconds
+        }
+    }
+
+    /// The built-in research action's deliverable filename (instances use their action's).
+    static var deliverableFileName: String { ClawdyAction.builtInResearch.deliverableFileName }
 
     // MARK: - Stable per-session output directory (durable, keyed by the client run id)
 
@@ -282,11 +296,15 @@ final class CodexResearchEngine: ResearchEngine {
         clarificationAnswers: String?,
         onProgress: @escaping @MainActor @Sendable (ResearchProgressEvent) -> Void
     ) async throws -> URL {
-        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(Self.deliverableFileName).path
+        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(action.deliverableFileName).path
         let prompt = Self.composeExecutePrompt(
             task: researchTask,
             outputFileAbsolutePath: deliverableAbsolutePath,
-            clarificationAnswers: clarificationAnswers
+            clarificationAnswers: clarificationAnswers,
+            template: ClawdyAction.render(
+                action.codexExecuteTemplate,
+                task: researchTask, outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path
+            )
         )
         let arguments = CodexResearchArguments.makeExecuteArguments(outputDirectoryPath: outputDirectory.path)
         // Capture + PERSIST the thread id (the resume handle) the INSTANT it is ingested
@@ -322,7 +340,7 @@ final class CodexResearchEngine: ResearchEngine {
         guard runResult.exitCode == 0 else {
             throw ResearchError.phaseFailed(standardError: runResult.standardError)
         }
-        guard let deliverableURL = Self.locateDeliverable(in: outputDirectory) else {
+        guard let deliverableURL = Self.locateDeliverable(in: outputDirectory, deliverableFileName: action.deliverableFileName) else {
             throw ResearchError.noDeliverableProduced
         }
         // DETERMINISTIC image-localization pass (same as the Claude engine): before the
@@ -370,12 +388,16 @@ final class CodexResearchEngine: ResearchEngine {
         guard let threadID = capturedThreadID else {
             throw ResearchError.noThreadIDForFollowUp
         }
-        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(Self.deliverableFileName).path
+        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(action.deliverableFileName).path
         let modificationDateBeforeTurn = Self.deliverableModificationDate(atPath: deliverableAbsolutePath)
 
         let prompt = Self.composeFollowUpPrompt(
             spokenFollowUp: followUpPrompt,
-            outputFileAbsolutePath: deliverableAbsolutePath
+            outputFileAbsolutePath: deliverableAbsolutePath,
+            template: ClawdyAction.render(
+                action.codexFollowUpTemplate,
+                task: researchTask, outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path
+            )
         )
         let arguments = CodexResearchArguments.makeResumeFollowUpArguments(threadID: threadID)
         let accumulator = CodexResearchStreamAccumulator()
@@ -411,7 +433,7 @@ final class CodexResearchEngine: ResearchEngine {
         return FollowUpPhaseResult(
             spokenAnswer: accumulator.lastResultText,
             deliverableWasRewritten: deliverableWasRewritten,
-            deliverableURL: Self.locateDeliverable(in: outputDirectory)
+            deliverableURL: Self.locateDeliverable(in: outputDirectory, deliverableFileName: action.deliverableFileName)
         )
     }
 
@@ -427,11 +449,13 @@ final class CodexResearchEngine: ResearchEngine {
     static func composeExecutePrompt(
         task: String,
         outputFileAbsolutePath: String,
-        clarificationAnswers: String?
+        clarificationAnswers: String?,
+        template: String? = nil
     ) -> String {
-        let instructions = """
-        you are clawdy's research agent. research the task thoroughly using web search NOW, in THIS one turn, yourself — do the searches and reading directly, do not defer or wait to be notified about any background job. then write ONE self-contained HTML page to the absolute path \(outputFileAbsolutePath). the page MUST keep all of its OWN code inline so it renders with no local dependencies: inline <style> only, no external stylesheet links, no external script src, no CDN or remote font references. the ONE exception is images — when the task is about photos or images, embed the real images you found via <img src="https://..."> using the actual remote image URLs you discovered while researching (genuine URLs, not placeholders), so the user can actually see them. NEVER fabricate or guess an image URL. prefer canonical, original-resolution image URLs and do NOT guess or construct sized thumbnail paths (e.g. never fabricate Wikimedia /thumb/.../NNNpx- variants). do NOT open, fetch, or otherwise verify image URLs before embedding them — that just wastes a tool call; embed the image URL directly from your search results. broken or unreachable images are handled automatically after the page is written (they're swapped for a clean placeholder), so never spend tool calls checking images. give the page a subtle OpenClaw red brand accent (#E5342B): use it for headings, links, and small primary accents, and optionally a very light red background tint — keep it tasteful, keep body text high-contrast and readable, and never tint photos/images. do not write any file other than that one report.html. when you're done, briefly confirm in your final message.
-        """
+        let instructions = template ?? ClawdyAction.render(
+            ClawdyAction.builtInResearch.codexExecuteTemplate,
+            task: task, outputPath: outputFileAbsolutePath, outputDir: (outputFileAbsolutePath as NSString).deletingLastPathComponent
+        )
         // The TASK leads so Codex knows what to research; then the clarifying answers (if
         // any); then the fixed research/output constraints.
         var sections: [String] = []
@@ -452,12 +476,14 @@ final class CodexResearchEngine: ResearchEngine {
     /// line asks for a short spoken answer so TTS never reads long tool logs aloud.
     static func composeFollowUpPrompt(
         spokenFollowUp: String,
-        outputFileAbsolutePath: String
+        outputFileAbsolutePath: String,
+        template: String? = nil
     ) -> String {
         let trimmedFollowUp = spokenFollowUp.trimmingCharacters(in: .whitespacesAndNewlines)
-        let instructions = """
-        the research page you produced is at \(outputFileAbsolutePath). only modify the page if I asked you to change it; otherwise just answer my question and write nothing. if you DO change it, rewrite that same report.html in place (inline <style> only, no external script src, no CDN or remote font references; a remote <img src="https://…"> is allowed for image tasks). do the work inline in THIS turn — do not defer to any background job. keep it short: end with a 1-2 sentence spoken summary/answer suitable to read aloud, and don't read long tool output or file contents aloud.
-        """
+        let instructions = template ?? ClawdyAction.render(
+            ClawdyAction.builtInResearch.codexFollowUpTemplate,
+            task: "", outputPath: outputFileAbsolutePath, outputDir: (outputFileAbsolutePath as NSString).deletingLastPathComponent
+        )
         if trimmedFollowUp.isEmpty {
             return instructions
         }
@@ -476,7 +502,7 @@ final class CodexResearchEngine: ResearchEngine {
 
     /// Finds the produced HTML deliverable in the output directory: the expected
     /// report.html if present, otherwise the most recently modified .html file.
-    static func locateDeliverable(in outputDirectory: URL) -> URL? {
+    static func locateDeliverable(in outputDirectory: URL, deliverableFileName: String = ClawdyAction.builtInResearch.deliverableFileName) -> URL? {
         let expected = outputDirectory.appendingPathComponent(deliverableFileName)
         if FileManager.default.fileExists(atPath: expected.path) {
             return expected

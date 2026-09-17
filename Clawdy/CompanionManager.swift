@@ -184,7 +184,38 @@ final class CompanionManager: ObservableObject {
     /// the first real turn uses so that turn reuses the warm process.
     private func prewarmSelectedEngineIfInstalled() {
         guard let coachEngine = resolveActiveCoachEngine() else { return }
-        coachEngine.prewarm(systemPrompt: Self.companionVoiceResponseSystemPrompt)
+        coachEngine.prewarm(systemPrompt: Self.companionVoiceResponseSystemPrompt(actions: loadActions()))
+    }
+
+    /// The user-extensible ACTIONS the warm router can hand a request to — the built-in
+    /// research action plus anything in `~/.clawdy/actions/<name>/ACTION.md`. Read fresh
+    /// on every turn (cheap) so an edit applies to the next question without a relaunch.
+    let actionStore: ClawdyActionStore
+
+    private func loadActions() -> [ClawdyAction] {
+        actionStore.loadActions()
+    }
+
+    /// The actions loaded for the turn in flight, so the streaming TTS suppression can
+    /// recognize any of their markers (not just `[RESEARCH]`).
+    private var currentTurnActions: [ClawdyAction] = [.builtInResearch]
+
+    /// Hands a routed request to the research subsystem to run under `action`. Records the
+    /// hand-off in the conversation history and settles the voice state; the session
+    /// itself runs in its own separate process and reports through its own overlay.
+    private func handOffToAction(_ action: ClawdyAction, taskDescription: String, transcript: String) {
+        stopAllTTS()
+        cancelThinkingCue()
+        conversationHistory.append((
+            userTranscript: transcript,
+            assistantResponse: "(handed this off to the \(action.name.lowercased()) action)"
+        ))
+        if conversationHistory.count > 10 {
+            conversationHistory.removeFirst(conversationHistory.count - 10)
+        }
+        researchSessionManager.startSession(taskDescription: taskDescription, action: action)
+        voiceState = .idle
+        scheduleTransientHideIfNeeded()
     }
 
     /// Manages autonomous research runs handed off by the warm router agent (each a
@@ -463,11 +494,17 @@ final class CompanionManager: ObservableObject {
     init(
         loadElevenLabsAPIKeyFromKeychain: @escaping () -> String? = TTSKeychainStore.loadAPIKey,
         localTTSClient injectedLocalTTSClient: SpeechTTSProviding? = nil,
-        dictationManager injectedDictationManager: BuddyDictationManager? = nil
+        dictationManager injectedDictationManager: BuddyDictationManager? = nil,
+        actionStore: ClawdyActionStore = .shared
     ) {
         // Default to a real dictation manager; tests inject a spy to assert the
         // abort paths cancel WITHOUT submitting (never the normal release path).
         self.buddyDictationManager = injectedDictationManager ?? BuddyDictationManager()
+        // Ship the built-in research action (and the format README) into
+        // `~/.clawdy/actions` on first launch so the user can read and edit it. Never
+        // overwrites; tests inject a temp-dir store.
+        self.actionStore = actionStore
+        actionStore.installDefaultsIfMissing()
         self.loadElevenLabsAPIKeyFromKeychain = loadElevenLabsAPIKeyFromKeychain
         // Default to the real on-device client (constructed here, on the main actor); tests
         // inject a fake whose playback drains instantly so the speak-then-settle path is fast.
@@ -1424,7 +1461,7 @@ final class CompanionManager: ObservableObject {
     /// style. One or more inline [POINT:...] tags may still appear in the reply.
     private static let companionFirstSentenceGuidance = "make your FIRST sentence very short and fast — just a few words, like a quick reaction or lead-in (\"ah, gotcha.\" / \"okay, so.\" / \"yep.\"). then give the actual answer in your next sentence. the short opener lets me start speaking instantly, so never lead with a long opening sentence."
 
-    private static let companionVoiceResponseSystemPrompt = """
+    private static let companionVoiceResponseSystemPromptPreamble = """
     you're clawdy, a friendly always-on companion that lives in the user's menu bar. the user just spoke to you via push-to-talk and you can see their screen(s). your reply will be spoken aloud via text-to-speech, so write the way you'd actually talk. this is an ongoing conversation — you remember everything they've said before.
 
     rules:
@@ -1441,26 +1478,16 @@ final class CompanionManager: ObservableObject {
     - focus on giving a thorough, useful explanation. don't end with simple yes/no questions like "want me to explain more?" or "should i show you?" — those are dead ends that force the user to just say yes.
     - instead, when it fits naturally, end by planting a seed — mention something bigger or more ambitious they could try, a related concept that goes deeper, or a next-level technique that builds on what you just explained. make it something worth coming back for, not a question they'd just nod to. it's okay to not end with anything extra if the answer is complete on its own.
     - if you receive multiple screen images, the one labeled "primary focus" is where the cursor is — prioritize that one but reference others if relevant.
+    """
 
-    research mode (routing):
-    you double as the router for a separate research subsystem. decide between answering inline versus routing the SAME way a coding agent decides between just DOING a task and stopping to PLAN one first. you PLAN — route to research — when the request needs gathering information from across the web or multiple sources, is multi-step or open-ended, or asks you to produce a compiled artifact (a page, gallery, list, comparison, or report). you just ACT — answer inline as a quick voice reply — when the request is simple, single-step, and immediately answerable right now from what's on the screen or from your own general knowledge.
-
-    so these ROUTE, because each needs web gathering and/or a compiled result: "find photos of aomori", "find the best noise-cancelling headphones", "gather everything on the tohoku earthquake", "put together a page of ramen spots in tokyo", "compare the top three standing desks and build a page". and these you ANSWER yourself, because each is immediately answerable in a sentence or two: "what's the capital of japan", "what does this error mean", "how do i center a div", "where do i click to submit". notice "find/gather/compile X" that lives out on the web is research even when the user never literally says "build a page" — the deliverable is implied.
-
-    when (and only when) the request is one of the plan-worthy, go-gather-and-build ones, do NOT answer it yourself and do NOT speak. instead your ENTIRE reply must be exactly one line: the marker [RESEARCH] followed by a single clear sentence describing the task to research. nothing before it, nothing after it, no spoken text, no point tag.
-
-    examples:
-    - user says "find photos of aomori": [RESEARCH] find photos of aomori and build a gallery page of them.
-    - user says "research the three best standing desks under a thousand dollars and build me a page comparing them": [RESEARCH] research the three best standing desks under $1000 and build a self-contained comparison page.
-
-    any request that is NOT a go-gather-and-build task — a normal question you can answer well in a sentence or two, or any on-screen pointing question — you answer yourself and never use the marker. an on-screen POINTING question ("where do i click…", "which button…") is ALWAYS a quick answer with a POINT tag, NEVER a research route.
-
+    /// The pointing section of the warm system prompt (unchanged by actions).
+    private static let companionPointingGuidance = """
     element pointing:
-    you have a small blue triangle cursor that can fly to and point at things on screen. use it whenever pointing would genuinely help the user — if they're asking how to do something, looking for a menu, trying to find a button, or need help navigating an app, point at the relevant element. err on the side of pointing rather than not pointing, because it makes your help way more useful and concrete.
+    you have a small red claw cursor that can fly to and point at things on screen. use it whenever pointing would genuinely help the user — if they're asking how to do something, looking for a menu, trying to find a button, or need help navigating an app, point at the relevant element. err on the side of pointing rather than not pointing, because it makes your help way more useful and concrete.
 
     don't point at things when it would be pointless — like if the user asks a general knowledge question, or the conversation has nothing to do with what's on screen, or you'd just be pointing at something obvious they're already looking at. but if there's a specific UI element, menu, button, or area on screen that's relevant to what you're helping with, point at it.
 
-    you can point at MORE THAN ONE thing in a single reply, and you SHOULD point at each distinct named place. whenever your answer names several specific places or landmarks — say the user circled a map and you mention a few spots, or you walk them through a few steps — emit an ORDERED point tag for EACH one, so the cursor visits every place you actually name rather than just the first one or two. place a coordinate tag INLINE, immediately AFTER the clause that names each location, IN THE ORDER you mention them. the blue cursor will then fly to each one in that same order as you speak. don't dump all the tags at the end — each tag goes right after the words it points at. only point at REAL named locations, landmarks, or ui elements the user could look for on screen — not every noun, and not vague areas. keep it to at most \(PointingTuning.maxPointsSoftCap) points in one reply; if you'd naturally name more, point at the most important \(PointingTuning.maxPointsSoftCap).
+    you can point at MORE THAN ONE thing in a single reply, and you SHOULD point at each distinct named place. whenever your answer names several specific places or landmarks — say the user circled a map and you mention a few spots, or you walk them through a few steps — emit an ORDERED point tag for EACH one, so the cursor visits every place you actually name rather than just the first one or two. place a coordinate tag INLINE, immediately AFTER the clause that names each location, IN THE ORDER you mention them. the red claw cursor will then fly to each one in that same order as you speak. don't dump all the tags at the end — each tag goes right after the words it points at. only point at REAL named locations, landmarks, or ui elements the user could look for on screen — not every noun, and not vague areas. keep it to at most \(PointingTuning.maxPointsSoftCap) points in one reply; if you'd naturally name more, point at the most important \(PointingTuning.maxPointsSoftCap).
 
     the screenshot images are labeled with their pixel dimensions. use those dimensions as the coordinate space. the origin (0,0) is the top-left corner of the image. x increases rightward, y increases downward.
 
@@ -1477,6 +1504,22 @@ final class CompanionManager: ObservableObject {
     - element is on screen 2 (not where cursor is): "that's over on your other monitor — see the terminal window? [POINT:400,300:terminal:screen2]"
     """
 
+    /// The warm voice agent's system prompt for the given set of actions: the fixed
+    /// companion rules, then the ROUTING section composed from the loaded actions (the
+    /// built-in research action plus any the user taught Clawdy in `~/.clawdy/actions`),
+    /// then the fixed pointing guidance. Composed PER TURN so an edited action applies on
+    /// the next question; `ClaudePersistentSession` respawns when the prompt changes.
+    static func companionVoiceResponseSystemPrompt(actions: [ClawdyAction]) -> String {
+        companionVoiceResponseSystemPromptPreamble
+            + "\n\n" + ClawdyActionRouterPrompt.compose(actions: actions)
+            + "\n\n" + companionPointingGuidance
+    }
+
+    /// The prompt with only the built-in research action — the pre-actions baseline.
+    private static var companionVoiceResponseSystemPrompt: String {
+        companionVoiceResponseSystemPrompt(actions: [.builtInResearch])
+    }
+
     /// Extra guidance appended to the system prompt ONLY on turns where a research
     /// session is FOCUSED (the user just opened / is viewing that session's page).
     /// It biases the warm router to emit a `[FOLLOWUP]` directive for a genuine
@@ -1485,7 +1528,7 @@ final class CompanionManager: ObservableObject {
     /// deliberately does NOT touch the sacred pointing rule: an on-screen pointing
     /// question STILL gets a quick spoken answer with a [POINT:...] tag, never a
     /// follow-up. Trivially-quick standalone questions are still answered inline,
-    /// and a brand-new go-gather-and-build ask still routes via [RESEARCH].
+    /// and a brand-new go-gather-and-build ask still routes to an action marker.
     private static let companionFocusedFollowUpAddendum = """
 
     focused research page (continue-thread routing):
@@ -1497,7 +1540,7 @@ final class CompanionManager: ObservableObject {
     - user says "make the background darker": [FOLLOWUP] change the page's background to a darker color.
     - user says "what sources did you use": [FOLLOWUP] tell me which sources the page was built from.
 
-    CRUCIAL — this does NOT change the pointing rule or quick answers. an on-screen POINTING question ("where do i click", "which button", "point to the submit button") is ALWAYS a quick spoken answer with a [POINT:...] tag, NEVER a [FOLLOWUP]. a quick standalone question unrelated to the page ("what's the capital of japan") you still answer inline. a brand-new go-gather-and-build ask about a DIFFERENT topic still uses [RESEARCH]. only a real continuation of the page you're looking at uses [FOLLOWUP].
+    CRUCIAL — this does NOT change the pointing rule or quick answers. an on-screen POINTING question ("where do i click", "which button", "point to the submit button") is ALWAYS a quick spoken answer with a [POINT:...] tag, NEVER a [FOLLOWUP]. a quick standalone question unrelated to the page ("what's the capital of japan") you still answer inline. a brand-new go-gather-and-build ask about a DIFFERENT topic still routes to an action with that action's marker. only a real continuation of the page you're looking at uses [FOLLOWUP].
     """
 
     // MARK: - Annotation Teardown
@@ -1670,9 +1713,12 @@ final class CompanionManager: ObservableObject {
         // below is exactly as before (warm quick-answer / new-research).
         let followUpTargetSessionID = resolveFollowUpTargetSessionID()
         let hasFollowUpTarget = followUpTargetSessionID != nil
+        let availableActions = loadActions()
+        currentTurnActions = availableActions
+        let baseSystemPrompt = Self.companionVoiceResponseSystemPrompt(actions: availableActions)
         let effectiveSystemPrompt = hasFollowUpTarget
-            ? Self.companionVoiceResponseSystemPrompt + Self.companionFocusedFollowUpAddendum
-            : Self.companionVoiceResponseSystemPrompt
+            ? baseSystemPrompt + Self.companionFocusedFollowUpAddendum
+            : baseSystemPrompt
 
         currentResponseTask = Task {
             // Stay in processing (spinner) state — no streaming text displayed
@@ -1831,7 +1877,8 @@ final class CompanionManager: ObservableObject {
                 // by focus. Both directive paths never speak the marker and never point.
                 switch Self.routeWarmReply(
                     fullResponseText: fullResponseText,
-                    isResearchSessionFocused: hasFollowUpTarget
+                    isResearchSessionFocused: hasFollowUpTarget,
+                    actions: availableActions
                 ) {
                 case .followUpFocusedSession:
                     stopAllTTS()
@@ -1851,18 +1898,14 @@ final class CompanionManager: ObservableObject {
                     await handleFocusedFollowUpResult(routed: followUpRouted, transcript: transcript)
                     return
                 case .newResearch(let researchTaskDescription):
-                    stopAllTTS()
-                    cancelThinkingCue()
-                    conversationHistory.append((
-                        userTranscript: transcript,
-                        assistantResponse: "(handed this off to research mode)"
-                    ))
-                    if conversationHistory.count > 10 {
-                        conversationHistory.removeFirst(conversationHistory.count - 10)
-                    }
-                    researchSessionManager.startSession(taskDescription: researchTaskDescription ?? transcript)
-                    voiceState = .idle
-                    scheduleTransientHideIfNeeded()
+                    handOffToAction(
+                        availableActions.first { $0.id == ClawdyAction.builtInResearchID } ?? .builtInResearch,
+                        taskDescription: researchTaskDescription ?? transcript,
+                        transcript: transcript
+                    )
+                    return
+                case .runAction(let action, let taskDescription):
+                    handOffToAction(action, taskDescription: taskDescription ?? transcript, transcript: transcript)
                     return
                 case .speakOrPoint:
                     break // fall through to the normal quick-answer / POINT path
@@ -2036,7 +2079,7 @@ final class CompanionManager: ObservableObject {
         // speak it: suppress TTS while the streamed text could still be either marker.
         // The final-result handler routes it. Both markers start with "[", so a lone
         // "[" already suppresses until it resolves one way or the other.
-        if ResearchDirective.looksLikeResearchPrefix(accumulatedText)
+        if ClawdyActionDirective.looksLikeDirectivePrefix(accumulatedText, actions: currentTurnActions)
             || FollowUpDirective.looksLikeFollowUpPrefix(accumulatedText) { return }
 
         guard let sentenceBuffer = currentSentenceBuffer,
@@ -2521,9 +2564,12 @@ final class CompanionManager: ObservableObject {
     enum WarmReplyRoute: Equatable {
         /// Continue the FOCUSED research session's own claude thread (`[FOLLOWUP]`).
         case followUpFocusedSession
-        /// Spawn a brand-new research run (`[RESEARCH]`); carries the task text (nil
-        /// when the marker had no description, in which case the transcript is used).
+        /// Spawn a brand-new research run (`[RESEARCH]`, the built-in action); carries the
+        /// task text (nil when the marker had no description, in which case the transcript
+        /// is used).
         case newResearch(task: String?)
+        /// Spawn a run of a USER-DEFINED action (its own `[TAG]`); same task semantics.
+        case runAction(ClawdyAction, task: String?)
         /// A normal spoken answer or an on-screen POINT — the everyday voice path.
         case speakOrPoint
     }
@@ -2575,9 +2621,14 @@ final class CompanionManager: ObservableObject {
     ///   1. Else a `[FOLLOWUP]` directive routes to the focused session — but ONLY when
     ///      a session is actually focused (the addendum is the only thing that makes the
     ///      agent emit it, and we never honor a stray marker with nothing focused).
-    ///   2. Else a `[RESEARCH]` directive spawns a new research run.
+    ///   2. Else an ACTION directive (`[RESEARCH]` for the built-in research action, or a
+    ///      user-defined action's own `[TAG]`) spawns a new run of that action.
     ///   3. Else it's a normal spoken answer.
-    static func routeWarmReply(fullResponseText: String, isResearchSessionFocused: Bool) -> WarmReplyRoute {
+    static func routeWarmReply(
+        fullResponseText: String,
+        isResearchSessionFocused: Bool,
+        actions: [ClawdyAction] = [.builtInResearch]
+    ) -> WarmReplyRoute {
         // 0. A POINT tag anywhere in the reply takes precedence over any routing
         // directive — pointing must ALWAYS fire the blue cursor.
         if fullResponseText.contains(pointTagMarker) {
@@ -2587,9 +2638,11 @@ final class CompanionManager: ObservableObject {
            FollowUpDirective.parse(from: fullResponseText).isFollowUpRequest {
             return .followUpFocusedSession
         }
-        let researchDirective = ResearchDirective.parse(from: fullResponseText)
-        if researchDirective.isResearchRequest {
-            return .newResearch(task: researchDirective.taskDescription)
+        if let directive = ClawdyActionDirective.parse(from: fullResponseText, actions: actions) {
+            if directive.action.id == ClawdyAction.builtInResearchID {
+                return .newResearch(task: directive.taskDescription)
+            }
+            return .runAction(directive.action, task: directive.taskDescription)
         }
         return .speakOrPoint
     }

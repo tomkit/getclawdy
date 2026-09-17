@@ -49,10 +49,12 @@ enum ResearchArguments {
     /// the plan + execute loop while still handling multi-source web research.
     static let model = "sonnet"
 
-    /// Just the three tools the execute phase is allowed to run, pre-authorized so
-    /// they run with NO per-tool permission prompt. No shell, no arbitrary file
-    /// access beyond the scoped `--add-dir` output directory.
-    static let allowedTools = ["WebSearch", "WebFetch", "Write"]
+    /// The built-in research action's tool allowlist (and the default for
+    /// `makeExecuteArguments`): just the three tools the execute phase is allowed to run,
+    /// pre-authorized so they run with NO per-tool permission prompt. No shell, no
+    /// arbitrary file access beyond the scoped `--add-dir` output directory. A user-defined
+    /// action supplies its own list via the `allowedTools` parameter.
+    static var allowedTools: [String] { ClawdyAction.builtInResearch.tools }
 
     /// Builds the PLAN/CLARIFY phase argument vector. The task is passed as the
     /// `-p` print-mode prompt. `--permission-mode plan` makes the model decide
@@ -104,7 +106,8 @@ enum ResearchArguments {
         maxBudgetUSD: Double,
         userMessage: String,
         systemPrompt: String,
-        useClaudeCustomizations: Bool
+        useClaudeCustomizations: Bool,
+        allowedTools: [String] = ResearchArguments.allowedTools
     ) -> [String] {
         var arguments = [
             "-p", userMessage,
