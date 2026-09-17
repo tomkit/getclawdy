@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Actions are now skills, in the standard SKILL.md format.** The `~/.clawdy/actions` format from 0.0.3 is replaced by `~/.clawdy/skills/<name>/SKILL.md`, the same file format as Claude Code / Codex skills (`name`, `description`, `allowed-tools`, markdown body) plus optional `clawdy-*` keys. The built-in `research/SKILL.md` is written on first launch.
+
+### Added
+- **Clawdy can run your own harness skills.** Skills in `~/.claude/skills` (or `~/.codex/skills` with Codex selected) are offered to the router as `[SKILL:name]`; a matching request runs the skill in a dedicated agent and the result is spoken back. A skill's `description` is the routing rule.
+- Skills without a page (`clawdy-deliverable: none`) speak their result instead of opening a results window.
+
 ## [0.0.3] - 2026-09-16
 
 ### Added

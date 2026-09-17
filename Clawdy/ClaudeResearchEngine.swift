@@ -32,7 +32,7 @@ final class ClaudeResearchEngine: ResearchEngine {
 
     /// Claude runs a distinct PLAN/clarify phase (`--permission-mode plan`) before
     /// executing.
-    var supportsPlanPhase: Bool { true }
+    var supportsPlanPhase: Bool { skill.planPhase }
 
     // MARK: - ResearchEngine directory + transcript strategy (promoted to the protocol)
 
@@ -92,10 +92,17 @@ final class ClaudeResearchEngine: ResearchEngine {
     /// Hard cost ceiling passed to the CLI as `--max-budget-usd` for the execute
     /// phase, so a runaway tool-using run can't spend unbounded subscription quota.
     private var maxBudgetUSD: Double
-    /// The ACTION this engine runs: its prompts, tool allowlist and deliverable name.
-    /// Defaults to the built-in research action (byte-identical to the pre-actions
-    /// research prompts); `adoptAction` swaps in a user-defined or user-edited one.
-    private(set) var action: ClawdyAction = .builtInResearch
+    /// The SKILL this engine runs: its prompts, tool allowlist and deliverable. Defaults
+    /// to the built-in research skill (byte-identical to the pre-skills research prompts);
+    /// `adoptSkill` swaps in a user-written Clawdy skill or one of the user's harness skills.
+    private(set) var skill: ClawdySkill = .builtInResearch
+    /// Whether this run's PLAN phase actually launched a `claude` process (so the session
+    /// id exists and the execute phase must `--resume` it). A skill with `planPhase ==
+    /// false` skips the plan process entirely, and the execute phase then STARTS the
+    /// session (`--session-id`) instead of resuming one that was never created.
+    private var didRunPlanProcess = false
+    /// The final assistant text of the last execute phase (spoken for `.none` deliverables).
+    private(set) var lastExecuteSpokenResult: String?
     /// The task the plan phase was started with, kept so the execute phase can fill the
     /// action's `{{task}}` placeholder (the resumed `claude` session already has it in
     /// context; this is only for prompt templating).
@@ -135,28 +142,28 @@ final class ClaudeResearchEngine: ResearchEngine {
         self.makeImageDownloader = makeImageDownloader
     }
 
-    /// Adopts a (user-defined or user-edited) action for this run. Prompts, the tool
-    /// allowlist and the deliverable name always follow the action. The numeric knobs
-    /// (execute timeout, budget) follow it too UNLESS the action is exactly the built-in
-    /// research definition — that one's numbers are already the engine's construction
-    /// defaults, so an explicitly-injected timeout/budget (tests, callers) is respected.
-    func adoptAction(_ adoptedAction: ClawdyAction) {
-        action = adoptedAction
-        if adoptedAction != .builtInResearch {
-            executePhaseTimeoutSeconds = adoptedAction.executeTimeoutSeconds
-            maxBudgetUSD = adoptedAction.maxBudgetUSD
+    /// Adopts the skill for this run. Prompts, the tool allowlist and the deliverable
+    /// always follow the skill. The numeric knobs (execute timeout, budget) follow it too
+    /// UNLESS the skill is exactly the built-in research definition — that one's numbers
+    /// are already the engine's construction defaults, so an explicitly-injected
+    /// timeout/budget (tests, callers) is respected.
+    func adoptSkill(_ adoptedSkill: ClawdySkill) {
+        skill = adoptedSkill
+        if adoptedSkill != .builtInResearch {
+            executePhaseTimeoutSeconds = adoptedSkill.executeTimeoutSeconds
+            maxBudgetUSD = adoptedSkill.maxBudgetUSD
         }
     }
 
-    // MARK: - System prompts (the built-in research action's; see ClawdyAction)
+    // MARK: - System prompts (the built-in research action's; see ClawdySkill)
 
-    static var planSystemPrompt: String { ClawdyAction.builtInResearch.planSystemPrompt }
-    static var executeSystemPrompt: String { ClawdyAction.builtInResearch.executeSystemPrompt }
-    static var followUpSystemPrompt: String { ClawdyAction.builtInResearch.followUpSystemPrompt }
+    static var planSystemPrompt: String { ClawdySkill.builtInResearch.planSystemPrompt }
+    static var executeSystemPrompt: String { ClawdySkill.builtInResearch.executeSystemPrompt }
+    static var followUpSystemPrompt: String { ClawdySkill.builtInResearch.followUpSystemPrompt }
 
     /// The deterministic deliverable filename the built-in research action's execute
     /// prompt instructs the model to write. Instances use their action's own name.
-    static var deliverableFileName: String { ClawdyAction.builtInResearch.deliverableFileName }
+    static var deliverableFileName: String { ClawdySkill.builtInResearch.deliverableFileName }
 
     // MARK: - Stable per-session output directory (durable, never $HOME)
 
@@ -274,10 +281,18 @@ final class ClaudeResearchEngine: ResearchEngine {
         onProgress: @escaping @MainActor @Sendable (ResearchProgressEvent) -> Void
     ) async throws -> PlanPhaseResult {
         currentTask = task
+        // A skill without a plan phase (harness skills, `clawdy-plan-phase: false`) goes
+        // straight to execution — no process is launched here, and the execute phase will
+        // START the session under the pre-minted id instead of resuming one.
+        guard skill.planPhase else {
+            didRunPlanProcess = false
+            return PlanPhaseResult(sessionID: sessionID, outcome: .readyToExecute)
+        }
+        didRunPlanProcess = true
         let arguments = ResearchArguments.makePlanArguments(
             task: task,
             sessionID: sessionID,
-            systemPrompt: action.planSystemPrompt,
+            systemPrompt: skill.planSystemPrompt,
             useClaudeCustomizations: useClaudeCustomizations
         )
         let accumulator = ResearchStreamAccumulator()
@@ -324,13 +339,13 @@ final class ClaudeResearchEngine: ResearchEngine {
     ) async throws -> URL {
         // The absolute deliverable path, so discovery is unambiguous regardless of
         // the model's working directory.
-        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(action.deliverableFileName).path
+        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(skill.deliverableFileName).path
         let userMessage = Self.composeExecuteUserMessage(
             outputFileAbsolutePath: deliverableAbsolutePath,
             clarificationAnswers: clarificationAnswers,
-            template: ClawdyAction.render(
-                action.executeMessageTemplate,
-                task: currentTask, outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path
+            template: ClawdySkill.render(
+                skill.executeMessageTemplate,
+                task: currentTask, outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path, skill: skill.name
             )
         )
         let arguments = ResearchArguments.makeExecuteArguments(
@@ -338,12 +353,13 @@ final class ClaudeResearchEngine: ResearchEngine {
             outputDirectoryPath: outputDirectory.path,
             maxBudgetUSD: maxBudgetUSD,
             userMessage: userMessage,
-            systemPrompt: ClawdyAction.render(
-                action.executeSystemPrompt,
-                task: currentTask, outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path
+            systemPrompt: ClawdySkill.render(
+                skill.executeSystemPrompt,
+                task: currentTask, outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path, skill: skill.name
             ),
             useClaudeCustomizations: useClaudeCustomizations,
-            allowedTools: action.tools
+            allowedTools: skill.tools,
+            resumesExistingSession: didRunPlanProcess
         )
         let accumulator = ResearchStreamAccumulator()
 
@@ -365,7 +381,14 @@ final class ClaudeResearchEngine: ResearchEngine {
         guard runResult.exitCode == 0 else {
             throw ResearchError.phaseFailed(standardError: runResult.standardError)
         }
-        guard let deliverableURL = Self.locateDeliverable(in: outputDirectory, deliverableFileName: action.deliverableFileName) else {
+        lastExecuteSpokenResult = accumulator.lastResultText
+        // A skill with NO on-disk deliverable (harness skills, `clawdy-deliverable: none`)
+        // is done here: the session speaks `lastExecuteSpokenResult`; the run directory
+        // stands in for the deliverable URL so the manifest/session plumbing is unchanged.
+        if skill.deliverable == .none {
+            return outputDirectory
+        }
+        guard let deliverableURL = Self.locateDeliverable(in: outputDirectory, deliverableFileName: skill.deliverableFileName) else {
             throw ResearchError.noDeliverableProduced
         }
         // DETERMINISTIC image-localization pass: before the page is ever shown, fetch
@@ -416,15 +439,15 @@ final class ClaudeResearchEngine: ResearchEngine {
         followUpPrompt: String,
         onProgress: @escaping @MainActor @Sendable (ResearchProgressEvent) -> Void
     ) async throws -> FollowUpPhaseResult {
-        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(action.deliverableFileName).path
+        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(skill.deliverableFileName).path
         let modificationDateBeforeTurn = Self.deliverableModificationDate(atPath: deliverableAbsolutePath)
 
         let userMessage = Self.composeFollowUpUserMessage(
             spokenFollowUp: followUpPrompt,
             outputFileAbsolutePath: deliverableAbsolutePath,
-            template: ClawdyAction.render(
-                action.followUpMessageTemplate,
-                task: "", outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path
+            template: ClawdySkill.render(
+                skill.followUpMessageTemplate,
+                task: "", outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path, skill: skill.name
             )
         )
         // The SAME execute-phase arg vector — only the user message and system prompt
@@ -434,12 +457,12 @@ final class ClaudeResearchEngine: ResearchEngine {
             outputDirectoryPath: outputDirectory.path,
             maxBudgetUSD: maxBudgetUSD,
             userMessage: userMessage,
-            systemPrompt: ClawdyAction.render(
-                action.followUpSystemPrompt,
-                task: "", outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path
+            systemPrompt: ClawdySkill.render(
+                skill.followUpSystemPrompt,
+                task: "", outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path, skill: skill.name
             ),
             useClaudeCustomizations: useClaudeCustomizations,
-            allowedTools: action.tools
+            allowedTools: skill.tools
         )
         let accumulator = ResearchStreamAccumulator()
 
@@ -479,7 +502,7 @@ final class ClaudeResearchEngine: ResearchEngine {
         return FollowUpPhaseResult(
             spokenAnswer: accumulator.lastResultText,
             deliverableWasRewritten: deliverableWasRewritten,
-            deliverableURL: Self.locateDeliverable(in: outputDirectory, deliverableFileName: action.deliverableFileName)
+            deliverableURL: Self.locateDeliverable(in: outputDirectory, deliverableFileName: skill.deliverableFileName)
         )
     }
 
@@ -494,8 +517,8 @@ final class ClaudeResearchEngine: ResearchEngine {
         template: String? = nil
     ) -> String {
         let trimmedFollowUp = spokenFollowUp.trimmingCharacters(in: .whitespacesAndNewlines)
-        let instructions = template ?? ClawdyAction.render(
-            ClawdyAction.builtInResearch.followUpMessageTemplate,
+        let instructions = template ?? ClawdySkill.render(
+            ClawdySkill.builtInResearch.followUpMessageTemplate,
             task: "", outputPath: outputFileAbsolutePath, outputDir: (outputFileAbsolutePath as NSString).deletingLastPathComponent
         )
         if trimmedFollowUp.isEmpty {
@@ -538,8 +561,8 @@ final class ClaudeResearchEngine: ResearchEngine {
         clarificationAnswers: String?,
         template: String? = nil
     ) -> String {
-        let executeInstructions = template ?? ClawdyAction.render(
-            ClawdyAction.builtInResearch.executeMessageTemplate,
+        let executeInstructions = template ?? ClawdySkill.render(
+            ClawdySkill.builtInResearch.executeMessageTemplate,
             task: "", outputPath: outputFileAbsolutePath, outputDir: (outputFileAbsolutePath as NSString).deletingLastPathComponent
         )
         if let answers = clarificationAnswers?.trimmingCharacters(in: .whitespacesAndNewlines), !answers.isEmpty {
@@ -550,7 +573,7 @@ final class ClaudeResearchEngine: ResearchEngine {
 
     /// Finds the produced HTML deliverable in the output directory: the expected
     /// report.html if present, otherwise the most recently modified .html file.
-    static func locateDeliverable(in outputDirectory: URL, deliverableFileName: String = ClawdyAction.builtInResearch.deliverableFileName) -> URL? {
+    static func locateDeliverable(in outputDirectory: URL, deliverableFileName: String = ClawdySkill.builtInResearch.deliverableFileName) -> URL? {
         let expected = outputDirectory.appendingPathComponent(deliverableFileName)
         if FileManager.default.fileExists(atPath: expected.path) {
             return expected

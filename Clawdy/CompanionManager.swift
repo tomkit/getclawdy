@@ -184,36 +184,43 @@ final class CompanionManager: ObservableObject {
     /// the first real turn uses so that turn reuses the warm process.
     private func prewarmSelectedEngineIfInstalled() {
         guard let coachEngine = resolveActiveCoachEngine() else { return }
-        coachEngine.prewarm(systemPrompt: Self.companionVoiceResponseSystemPrompt(actions: loadActions()))
+        coachEngine.prewarm(systemPrompt: Self.companionVoiceResponseSystemPrompt(skills: loadSkills()))
     }
 
-    /// The user-extensible ACTIONS the warm router can hand a request to — the built-in
-    /// research action plus anything in `~/.clawdy/actions/<name>/ACTION.md`. Read fresh
-    /// on every turn (cheap) so an edit applies to the next question without a relaunch.
-    let actionStore: ClawdyActionStore
+    /// The SKILLS the warm router can hand a request to: the built-in research skill, any
+    /// Clawdy skill in `~/.clawdy/skills/<name>/SKILL.md`, and — when "Use my Claude Code
+    /// setup" is on — the user's ordinary harness skills for the selected engine
+    /// (`~/.claude/skills` or `~/.codex/skills`). Read fresh on every turn (cheap) so an
+    /// edit or a newly-installed skill applies to the next question without a relaunch.
+    let skillStore: ClawdySkillStore
 
-    private func loadActions() -> [ClawdyAction] {
-        actionStore.loadActions()
+    private func loadSkills() -> [ClawdySkill] {
+        // With the user's setup isolated (`--safe-mode`) the dedicated run couldn't load a
+        // harness skill either, so don't offer them to the router in that mode.
+        let harnessSkillsDirectory = (useClaudeCustomizations && selectedEngineKind != nil)
+            ? ClawdySkillStore.harnessSkillsDirectory(for: selectedEngineKind!)
+            : nil
+        return skillStore.loadSkills(harnessSkillsDirectory: harnessSkillsDirectory)
     }
 
-    /// The actions loaded for the turn in flight, so the streaming TTS suppression can
+    /// The skills loaded for the turn in flight, so the streaming TTS suppression can
     /// recognize any of their markers (not just `[RESEARCH]`).
-    private var currentTurnActions: [ClawdyAction] = [.builtInResearch]
+    private var currentTurnSkills: [ClawdySkill] = [.builtInResearch]
 
-    /// Hands a routed request to the research subsystem to run under `action`. Records the
+    /// Hands a routed request to the research subsystem to run under `skill`. Records the
     /// hand-off in the conversation history and settles the voice state; the session
     /// itself runs in its own separate process and reports through its own overlay.
-    private func handOffToAction(_ action: ClawdyAction, taskDescription: String, transcript: String) {
+    private func handOffToSkill(_ skill: ClawdySkill, taskDescription: String, transcript: String) {
         stopAllTTS()
         cancelThinkingCue()
         conversationHistory.append((
             userTranscript: transcript,
-            assistantResponse: "(handed this off to the \(action.name.lowercased()) action)"
+            assistantResponse: "(handed this off to the \(skill.name) skill)"
         ))
         if conversationHistory.count > 10 {
             conversationHistory.removeFirst(conversationHistory.count - 10)
         }
-        researchSessionManager.startSession(taskDescription: taskDescription, action: action)
+        researchSessionManager.startSession(taskDescription: taskDescription, skill: skill)
         voiceState = .idle
         scheduleTransientHideIfNeeded()
     }
@@ -495,16 +502,16 @@ final class CompanionManager: ObservableObject {
         loadElevenLabsAPIKeyFromKeychain: @escaping () -> String? = TTSKeychainStore.loadAPIKey,
         localTTSClient injectedLocalTTSClient: SpeechTTSProviding? = nil,
         dictationManager injectedDictationManager: BuddyDictationManager? = nil,
-        actionStore: ClawdyActionStore = .shared
+        skillStore: ClawdySkillStore = .shared
     ) {
         // Default to a real dictation manager; tests inject a spy to assert the
         // abort paths cancel WITHOUT submitting (never the normal release path).
         self.buddyDictationManager = injectedDictationManager ?? BuddyDictationManager()
-        // Ship the built-in research action (and the format README) into
-        // `~/.clawdy/actions` on first launch so the user can read and edit it. Never
+        // Ship the built-in research skill (and the format README) into
+        // `~/.clawdy/skills` on first launch so the user can read and edit it. Never
         // overwrites; tests inject a temp-dir store.
-        self.actionStore = actionStore
-        actionStore.installDefaultsIfMissing()
+        self.skillStore = skillStore
+        skillStore.installDefaultsIfMissing()
         self.loadElevenLabsAPIKeyFromKeychain = loadElevenLabsAPIKeyFromKeychain
         // Default to the real on-device client (constructed here, on the main actor); tests
         // inject a fake whose playback drains instantly so the speak-then-settle path is fast.
@@ -1480,7 +1487,7 @@ final class CompanionManager: ObservableObject {
     - if you receive multiple screen images, the one labeled "primary focus" is where the cursor is — prioritize that one but reference others if relevant.
     """
 
-    /// The pointing section of the warm system prompt (unchanged by actions).
+    /// The pointing section of the warm system prompt (unchanged by skills).
     private static let companionPointingGuidance = """
     element pointing:
     you have a small red claw cursor that can fly to and point at things on screen. use it whenever pointing would genuinely help the user — if they're asking how to do something, looking for a menu, trying to find a button, or need help navigating an app, point at the relevant element. err on the side of pointing rather than not pointing, because it makes your help way more useful and concrete.
@@ -1504,20 +1511,20 @@ final class CompanionManager: ObservableObject {
     - element is on screen 2 (not where cursor is): "that's over on your other monitor — see the terminal window? [POINT:400,300:terminal:screen2]"
     """
 
-    /// The warm voice agent's system prompt for the given set of actions: the fixed
-    /// companion rules, then the ROUTING section composed from the loaded actions (the
-    /// built-in research action plus any the user taught Clawdy in `~/.clawdy/actions`),
-    /// then the fixed pointing guidance. Composed PER TURN so an edited action applies on
-    /// the next question; `ClaudePersistentSession` respawns when the prompt changes.
-    static func companionVoiceResponseSystemPrompt(actions: [ClawdyAction]) -> String {
+    /// The warm voice agent's system prompt for the given set of skills: the fixed
+    /// companion rules, then the ROUTING section composed from the loaded skills (the
+    /// built-in research skill, the user's Clawdy skills, and their harness skills), then
+    /// the fixed pointing guidance. Composed PER TURN so an edited or newly-installed skill
+    /// applies on the next question; `ClaudePersistentSession` respawns when it changes.
+    static func companionVoiceResponseSystemPrompt(skills: [ClawdySkill]) -> String {
         companionVoiceResponseSystemPromptPreamble
-            + "\n\n" + ClawdyActionRouterPrompt.compose(actions: actions)
+            + "\n\n" + ClawdySkillRouterPrompt.compose(skills: skills)
             + "\n\n" + companionPointingGuidance
     }
 
-    /// The prompt with only the built-in research action — the pre-actions baseline.
+    /// The prompt with only the built-in research skill — the pre-skills baseline.
     private static var companionVoiceResponseSystemPrompt: String {
-        companionVoiceResponseSystemPrompt(actions: [.builtInResearch])
+        companionVoiceResponseSystemPrompt(skills: [.builtInResearch])
     }
 
     /// Extra guidance appended to the system prompt ONLY on turns where a research
@@ -1528,7 +1535,7 @@ final class CompanionManager: ObservableObject {
     /// deliberately does NOT touch the sacred pointing rule: an on-screen pointing
     /// question STILL gets a quick spoken answer with a [POINT:...] tag, never a
     /// follow-up. Trivially-quick standalone questions are still answered inline,
-    /// and a brand-new go-gather-and-build ask still routes to an action marker.
+    /// and a brand-new go-gather-and-build ask still routes to a skill marker.
     private static let companionFocusedFollowUpAddendum = """
 
     focused research page (continue-thread routing):
@@ -1540,7 +1547,7 @@ final class CompanionManager: ObservableObject {
     - user says "make the background darker": [FOLLOWUP] change the page's background to a darker color.
     - user says "what sources did you use": [FOLLOWUP] tell me which sources the page was built from.
 
-    CRUCIAL — this does NOT change the pointing rule or quick answers. an on-screen POINTING question ("where do i click", "which button", "point to the submit button") is ALWAYS a quick spoken answer with a [POINT:...] tag, NEVER a [FOLLOWUP]. a quick standalone question unrelated to the page ("what's the capital of japan") you still answer inline. a brand-new go-gather-and-build ask about a DIFFERENT topic still routes to an action with that action's marker. only a real continuation of the page you're looking at uses [FOLLOWUP].
+    CRUCIAL — this does NOT change the pointing rule or quick answers. an on-screen POINTING question ("where do i click", "which button", "point to the submit button") is ALWAYS a quick spoken answer with a [POINT:...] tag, NEVER a [FOLLOWUP]. a quick standalone question unrelated to the page ("what's the capital of japan") you still answer inline. a brand-new go-gather-and-build ask about a DIFFERENT topic still routes to a skill with that skill's marker. only a real continuation of the page you're looking at uses [FOLLOWUP].
     """
 
     // MARK: - Annotation Teardown
@@ -1713,9 +1720,9 @@ final class CompanionManager: ObservableObject {
         // below is exactly as before (warm quick-answer / new-research).
         let followUpTargetSessionID = resolveFollowUpTargetSessionID()
         let hasFollowUpTarget = followUpTargetSessionID != nil
-        let availableActions = loadActions()
-        currentTurnActions = availableActions
-        let baseSystemPrompt = Self.companionVoiceResponseSystemPrompt(actions: availableActions)
+        let availableSkills = loadSkills()
+        currentTurnSkills = availableSkills
+        let baseSystemPrompt = Self.companionVoiceResponseSystemPrompt(skills: availableSkills)
         let effectiveSystemPrompt = hasFollowUpTarget
             ? baseSystemPrompt + Self.companionFocusedFollowUpAddendum
             : baseSystemPrompt
@@ -1878,7 +1885,7 @@ final class CompanionManager: ObservableObject {
                 switch Self.routeWarmReply(
                     fullResponseText: fullResponseText,
                     isResearchSessionFocused: hasFollowUpTarget,
-                    actions: availableActions
+                    skills: availableSkills
                 ) {
                 case .followUpFocusedSession:
                     stopAllTTS()
@@ -1898,14 +1905,14 @@ final class CompanionManager: ObservableObject {
                     await handleFocusedFollowUpResult(routed: followUpRouted, transcript: transcript)
                     return
                 case .newResearch(let researchTaskDescription):
-                    handOffToAction(
-                        availableActions.first { $0.id == ClawdyAction.builtInResearchID } ?? .builtInResearch,
+                    handOffToSkill(
+                        availableSkills.first { $0.id == ClawdySkill.builtInResearchID } ?? .builtInResearch,
                         taskDescription: researchTaskDescription ?? transcript,
                         transcript: transcript
                     )
                     return
-                case .runAction(let action, let taskDescription):
-                    handOffToAction(action, taskDescription: taskDescription ?? transcript, transcript: transcript)
+                case .runSkill(let skill, let taskDescription):
+                    handOffToSkill(skill, taskDescription: taskDescription ?? transcript, transcript: transcript)
                     return
                 case .speakOrPoint:
                     break // fall through to the normal quick-answer / POINT path
@@ -2079,7 +2086,7 @@ final class CompanionManager: ObservableObject {
         // speak it: suppress TTS while the streamed text could still be either marker.
         // The final-result handler routes it. Both markers start with "[", so a lone
         // "[" already suppresses until it resolves one way or the other.
-        if ClawdyActionDirective.looksLikeDirectivePrefix(accumulatedText, actions: currentTurnActions)
+        if ClawdySkillDirective.looksLikeDirectivePrefix(accumulatedText, skills: currentTurnSkills)
             || FollowUpDirective.looksLikeFollowUpPrefix(accumulatedText) { return }
 
         guard let sentenceBuffer = currentSentenceBuffer,
@@ -2564,12 +2571,13 @@ final class CompanionManager: ObservableObject {
     enum WarmReplyRoute: Equatable {
         /// Continue the FOCUSED research session's own claude thread (`[FOLLOWUP]`).
         case followUpFocusedSession
-        /// Spawn a brand-new research run (`[RESEARCH]`, the built-in action); carries the
+        /// Spawn a brand-new research run (`[RESEARCH]`, the built-in skill); carries the
         /// task text (nil when the marker had no description, in which case the transcript
         /// is used).
         case newResearch(task: String?)
-        /// Spawn a run of a USER-DEFINED action (its own `[TAG]`); same task semantics.
-        case runAction(ClawdyAction, task: String?)
+        /// Spawn a run of another SKILL — a user-written Clawdy skill (its own `[TAG]`) or
+        /// one of the user's harness skills (`[SKILL:name]`); same task semantics.
+        case runSkill(ClawdySkill, task: String?)
         /// A normal spoken answer or an on-screen POINT — the everyday voice path.
         case speakOrPoint
     }
@@ -2621,13 +2629,13 @@ final class CompanionManager: ObservableObject {
     ///   1. Else a `[FOLLOWUP]` directive routes to the focused session — but ONLY when
     ///      a session is actually focused (the addendum is the only thing that makes the
     ///      agent emit it, and we never honor a stray marker with nothing focused).
-    ///   2. Else an ACTION directive (`[RESEARCH]` for the built-in research action, or a
-    ///      user-defined action's own `[TAG]`) spawns a new run of that action.
+    ///   2. Else a SKILL directive (`[RESEARCH]` for the built-in research skill, another
+    ///      Clawdy skill's `[TAG]`, or a harness skill's `[SKILL:name]`) spawns a run of it.
     ///   3. Else it's a normal spoken answer.
     static func routeWarmReply(
         fullResponseText: String,
         isResearchSessionFocused: Bool,
-        actions: [ClawdyAction] = [.builtInResearch]
+        skills: [ClawdySkill] = [.builtInResearch]
     ) -> WarmReplyRoute {
         // 0. A POINT tag anywhere in the reply takes precedence over any routing
         // directive — pointing must ALWAYS fire the blue cursor.
@@ -2638,11 +2646,11 @@ final class CompanionManager: ObservableObject {
            FollowUpDirective.parse(from: fullResponseText).isFollowUpRequest {
             return .followUpFocusedSession
         }
-        if let directive = ClawdyActionDirective.parse(from: fullResponseText, actions: actions) {
-            if directive.action.id == ClawdyAction.builtInResearchID {
+        if let directive = ClawdySkillDirective.parse(from: fullResponseText, skills: skills) {
+            if directive.skill.id == ClawdySkill.builtInResearchID {
                 return .newResearch(task: directive.taskDescription)
             }
-            return .runAction(directive.action, task: directive.taskDescription)
+            return .runSkill(directive.skill, task: directive.taskDescription)
         }
         return .speakOrPoint
     }

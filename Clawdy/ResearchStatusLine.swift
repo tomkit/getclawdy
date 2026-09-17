@@ -22,6 +22,8 @@ enum ResearchStatusLine {
     /// Shown while a voice follow-up turn is continuing a finished session.
     static let workingOnFollowUp = "Working on your follow-up…"
     /// The terminal, tappable affordance once the deliverable HTML is ready.
+    /// A finished skill run with nothing to open (its answer was spoken).
+    static let skillDone = "Done ›"
     static let viewResults = "View results ›"
     /// Shown briefly if a run is cancelled via the Stop control.
     static let stopped = "Research stopped"

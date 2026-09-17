@@ -74,9 +74,11 @@ final class CodexResearchEngine: ResearchEngine {
     /// ONLY spend bound Codex offers — there is no `--max-budget-usd`. Enforced by
     /// CLIProcessRunner, which terminates the child when it elapses.
     private var executePhaseTimeoutSeconds: TimeInterval
-    /// The ACTION this engine runs (prompts + deliverable name). Defaults to the built-in
-    /// research action; `adoptAction` swaps in a user-defined or user-edited one.
-    private(set) var action: ClawdyAction = .builtInResearch
+    /// The SKILL this engine runs (prompts + deliverable). Defaults to the built-in
+    /// research skill; `adoptSkill` swaps in a Clawdy skill or one of the user's Codex skills.
+    private(set) var skill: ClawdySkill = .builtInResearch
+    /// The final assistant text of the last execute phase (spoken for `.none` deliverables).
+    private(set) var lastExecuteSpokenResult: String?
     /// The manifest index the captured Codex `thread_id` is PERSISTED to the moment the
     /// execute turn discovers it — so the resume handle survives app relaunch instead of
     /// living only in this engine's memory (the gap that blocked Codex reconstruction /
@@ -158,20 +160,20 @@ final class CodexResearchEngine: ResearchEngine {
         self.makeImageDownloader = makeImageDownloader
     }
 
-    /// Adopts a (user-defined or user-edited) action for this run. The prompts and the
-    /// deliverable name always follow the action; the execute timeout follows it unless
-    /// the action is exactly the built-in research definition (whose timeout is already
-    /// the construction default, so an explicitly-injected one is respected). Codex has
-    /// no `--max-budget-usd`, so the action's budget is not applied here.
-    func adoptAction(_ adoptedAction: ClawdyAction) {
-        action = adoptedAction
-        if adoptedAction != .builtInResearch {
-            executePhaseTimeoutSeconds = adoptedAction.executeTimeoutSeconds
+    /// Adopts the skill for this run. The prompts and the deliverable always follow the
+    /// skill; the execute timeout follows it unless the skill is exactly the built-in
+    /// research definition (whose timeout is already the construction default, so an
+    /// explicitly-injected one is respected). Codex has no `--max-budget-usd`, so the
+    /// skill's budget is not applied here.
+    func adoptSkill(_ adoptedSkill: ClawdySkill) {
+        skill = adoptedSkill
+        if adoptedSkill != .builtInResearch {
+            executePhaseTimeoutSeconds = adoptedSkill.executeTimeoutSeconds
         }
     }
 
     /// The built-in research action's deliverable filename (instances use their action's).
-    static var deliverableFileName: String { ClawdyAction.builtInResearch.deliverableFileName }
+    static var deliverableFileName: String { ClawdySkill.builtInResearch.deliverableFileName }
 
     // MARK: - Stable per-session output directory (durable, keyed by the client run id)
 
@@ -296,14 +298,14 @@ final class CodexResearchEngine: ResearchEngine {
         clarificationAnswers: String?,
         onProgress: @escaping @MainActor @Sendable (ResearchProgressEvent) -> Void
     ) async throws -> URL {
-        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(action.deliverableFileName).path
+        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(skill.deliverableFileName).path
         let prompt = Self.composeExecutePrompt(
             task: researchTask,
             outputFileAbsolutePath: deliverableAbsolutePath,
             clarificationAnswers: clarificationAnswers,
-            template: ClawdyAction.render(
-                action.codexExecuteTemplate,
-                task: researchTask, outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path
+            template: ClawdySkill.render(
+                skill.codexExecuteTemplate,
+                task: researchTask, outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path, skill: skill.name
             )
         )
         let arguments = CodexResearchArguments.makeExecuteArguments(outputDirectoryPath: outputDirectory.path)
@@ -340,7 +342,12 @@ final class CodexResearchEngine: ResearchEngine {
         guard runResult.exitCode == 0 else {
             throw ResearchError.phaseFailed(standardError: runResult.standardError)
         }
-        guard let deliverableURL = Self.locateDeliverable(in: outputDirectory, deliverableFileName: action.deliverableFileName) else {
+        lastExecuteSpokenResult = accumulator.lastResultText
+        // A skill with NO on-disk deliverable is done here; the session speaks the result.
+        if skill.deliverable == .none {
+            return outputDirectory
+        }
+        guard let deliverableURL = Self.locateDeliverable(in: outputDirectory, deliverableFileName: skill.deliverableFileName) else {
             throw ResearchError.noDeliverableProduced
         }
         // DETERMINISTIC image-localization pass (same as the Claude engine): before the
@@ -388,15 +395,15 @@ final class CodexResearchEngine: ResearchEngine {
         guard let threadID = capturedThreadID else {
             throw ResearchError.noThreadIDForFollowUp
         }
-        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(action.deliverableFileName).path
+        let deliverableAbsolutePath = outputDirectory.appendingPathComponent(skill.deliverableFileName).path
         let modificationDateBeforeTurn = Self.deliverableModificationDate(atPath: deliverableAbsolutePath)
 
         let prompt = Self.composeFollowUpPrompt(
             spokenFollowUp: followUpPrompt,
             outputFileAbsolutePath: deliverableAbsolutePath,
-            template: ClawdyAction.render(
-                action.codexFollowUpTemplate,
-                task: researchTask, outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path
+            template: ClawdySkill.render(
+                skill.codexFollowUpTemplate,
+                task: researchTask, outputPath: deliverableAbsolutePath, outputDir: outputDirectory.path, skill: skill.name
             )
         )
         let arguments = CodexResearchArguments.makeResumeFollowUpArguments(threadID: threadID)
@@ -433,7 +440,7 @@ final class CodexResearchEngine: ResearchEngine {
         return FollowUpPhaseResult(
             spokenAnswer: accumulator.lastResultText,
             deliverableWasRewritten: deliverableWasRewritten,
-            deliverableURL: Self.locateDeliverable(in: outputDirectory, deliverableFileName: action.deliverableFileName)
+            deliverableURL: Self.locateDeliverable(in: outputDirectory, deliverableFileName: skill.deliverableFileName)
         )
     }
 
@@ -452,8 +459,8 @@ final class CodexResearchEngine: ResearchEngine {
         clarificationAnswers: String?,
         template: String? = nil
     ) -> String {
-        let instructions = template ?? ClawdyAction.render(
-            ClawdyAction.builtInResearch.codexExecuteTemplate,
+        let instructions = template ?? ClawdySkill.render(
+            ClawdySkill.builtInResearch.codexExecuteTemplate,
             task: task, outputPath: outputFileAbsolutePath, outputDir: (outputFileAbsolutePath as NSString).deletingLastPathComponent
         )
         // The TASK leads so Codex knows what to research; then the clarifying answers (if
@@ -480,8 +487,8 @@ final class CodexResearchEngine: ResearchEngine {
         template: String? = nil
     ) -> String {
         let trimmedFollowUp = spokenFollowUp.trimmingCharacters(in: .whitespacesAndNewlines)
-        let instructions = template ?? ClawdyAction.render(
-            ClawdyAction.builtInResearch.codexFollowUpTemplate,
+        let instructions = template ?? ClawdySkill.render(
+            ClawdySkill.builtInResearch.codexFollowUpTemplate,
             task: "", outputPath: outputFileAbsolutePath, outputDir: (outputFileAbsolutePath as NSString).deletingLastPathComponent
         )
         if trimmedFollowUp.isEmpty {
@@ -502,7 +509,7 @@ final class CodexResearchEngine: ResearchEngine {
 
     /// Finds the produced HTML deliverable in the output directory: the expected
     /// report.html if present, otherwise the most recently modified .html file.
-    static func locateDeliverable(in outputDirectory: URL, deliverableFileName: String = ClawdyAction.builtInResearch.deliverableFileName) -> URL? {
+    static func locateDeliverable(in outputDirectory: URL, deliverableFileName: String = ClawdySkill.builtInResearch.deliverableFileName) -> URL? {
         let expected = outputDirectory.appendingPathComponent(deliverableFileName)
         if FileManager.default.fileExists(atPath: expected.path) {
             return expected

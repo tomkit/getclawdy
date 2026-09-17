@@ -54,7 +54,7 @@ enum ResearchArguments {
     /// pre-authorized so they run with NO per-tool permission prompt. No shell, no
     /// arbitrary file access beyond the scoped `--add-dir` output directory. A user-defined
     /// action supplies its own list via the `allowedTools` parameter.
-    static var allowedTools: [String] { ClawdyAction.builtInResearch.tools }
+    static var allowedTools: [String] { ClawdySkill.builtInResearch.tools }
 
     /// Builds the PLAN/CLARIFY phase argument vector. The task is passed as the
     /// `-p` print-mode prompt. `--permission-mode plan` makes the model decide
@@ -107,11 +107,14 @@ enum ResearchArguments {
         userMessage: String,
         systemPrompt: String,
         useClaudeCustomizations: Bool,
-        allowedTools: [String] = ResearchArguments.allowedTools
+        allowedTools: [String] = ResearchArguments.allowedTools,
+        resumesExistingSession: Bool = true
     ) -> [String] {
+        // A skill that skipped the plan phase has no session to resume yet: START one under
+        // the pre-minted id instead (claude echoes it back), so follow-ups can resume it.
         var arguments = [
             "-p", userMessage,
-            "--resume", sessionID,
+            resumesExistingSession ? "--resume" : "--session-id", sessionID,
             "--append-system-prompt", systemPrompt,
             "--permission-mode", "acceptEdits"
         ]

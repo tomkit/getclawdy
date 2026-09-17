@@ -266,12 +266,12 @@ final class ResearchSessionManager: ObservableObject {
     /// ALWAYS creates a new concurrent session — a second `[RESEARCH]` while one is
     /// running is NOT rejected. Returns the new session's id.
     @discardableResult
-    func startSession(taskDescription: String, action: ClawdyAction = .builtInResearch) -> ResearchSessionID {
+    func startSession(taskDescription: String, skill: ClawdySkill = .builtInResearch) -> ResearchSessionID {
         let sessionID = mintUniqueSessionID()
         let session = ResearchSession(
             sessionID: sessionID,
             taskDescription: taskDescription,
-            action: action,
+            skill: skill,
             resolveEngineSelection: resolveResearchEngineSelection,
             makeEngine: makeEngine,
             applicationSupportDirectory: applicationSupportDirectory,

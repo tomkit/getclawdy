@@ -83,11 +83,11 @@ struct ResearchManifestEntry: Codable, Equatable {
     /// and is treated as the historical Claude engine. It is purely descriptive — it
     /// never changes how a run behaves.
     var engineKind: String? = nil
-    /// The ACTION that produced the run (`"research"` for the built-in one, or the id of
-    /// a user-defined action from `~/.clawdy/actions`). Optional and default-nil so
-    /// pre-existing manifests still decode; an absent value means the built-in research
-    /// action. Descriptive only — it never changes how a finished run is reconstructed.
-    var actionID: String? = nil
+    /// The SKILL that produced the run (`"research"` for the built-in one, the id of a
+    /// Clawdy skill from `~/.clawdy/skills`, or a harness skill's name). Optional and
+    /// default-nil so pre-existing manifests still decode; an absent value means the
+    /// built-in research skill. Descriptive only — it never changes reconstruction.
+    var skillID: String? = nil
     /// For a Codex research run: the Codex `thread_id` this run produced, captured
     /// POST-HOC from the execute turn's `thread.started` event and persisted as the
     /// durable RESUME handle later stages (reconstruction / follow-up / resume-in-terminal)
@@ -166,7 +166,7 @@ final class ResearchManifestStore: @unchecked Sendable {
         workingDir: String,
         transcriptPath: String,
         engineKind: CoachEngineKind = .claudeCode,
-        actionID: String = ClawdyAction.builtInResearchID
+        skillID: String = ClawdySkill.builtInResearchID
     ) {
         let now = dateProvider()
         let entry = ResearchManifestEntry(
@@ -181,7 +181,7 @@ final class ResearchManifestStore: @unchecked Sendable {
             transcriptPath: transcriptPath,
             deliverablePath: nil,
             engineKind: engineKind.rawValue,
-            actionID: actionID
+            skillID: skillID
         )
         upsert(entry)
     }

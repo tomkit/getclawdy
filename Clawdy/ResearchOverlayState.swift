@@ -275,11 +275,12 @@ struct ResearchOverlayState: Equatable {
         appendLogEntry(ResearchStatusLine.workingOnFollowUp)
     }
 
-    /// The deliverable is ready: move to `.done` and offer the view-results action.
-    mutating func markCompleted() {
+    /// The run finished: move to `.done`. With a deliverable, offer the view-results
+    /// action; a no-deliverable skill run (its answer was spoken) just reads as done.
+    mutating func markCompleted(hasDeliverable: Bool = true) {
         phase = .done
-        statusLine = ResearchStatusLine.viewResults
-        appendLogEntry("Research complete — report ready.")
+        statusLine = hasDeliverable ? ResearchStatusLine.viewResults : ResearchStatusLine.skillDone
+        appendLogEntry(hasDeliverable ? "Research complete — report ready." : "Done — answer spoken.")
     }
 
     /// The run failed: move to `.error`.

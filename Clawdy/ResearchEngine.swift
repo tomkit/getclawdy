@@ -102,12 +102,18 @@ protocol ResearchEngine: AnyObject {
     /// captured its own handle during the run never needs it.
     func adoptResumeHandle(_ resumeHandle: String)
 
-    /// Hands the engine the ACTION this run executes (the built-in research action or
-    /// a user-defined/edited one from `~/.clawdy/actions`): its prompts, tool allowlist,
-    /// deliverable name and numeric knobs. Called by `ResearchSession` right after the
-    /// engine is built, before any phase runs. The default is a no-op so a test fake or
-    /// an engine with fixed prompts is unaffected.
-    func adoptAction(_ action: ClawdyAction)
+    /// Hands the engine the SKILL this run executes (the built-in research skill, a
+    /// user-written Clawdy skill, or one of the user's harness skills): its prompts, tool
+    /// allowlist, deliverable and numeric knobs. Called by `ResearchSession` right after
+    /// the engine is built, before any phase runs. The default is a no-op so a test fake
+    /// or an engine with fixed prompts is unaffected.
+    func adoptSkill(_ skill: ClawdySkill)
+
+    /// The final assistant text of the last execute phase — what a run with NO on-disk
+    /// deliverable (`ClawdySkill.DeliverableKind.none`, e.g. a harness skill) speaks
+    /// back to the user. Nil until an execute phase finished, or for engines that don't
+    /// capture it (the default).
+    var lastExecuteSpokenResult: String? { get }
 
     /// Creates (if needed) and returns the STABLE, durable per-session working
     /// directory this engine's run executes in and writes its deliverable to.
@@ -168,5 +174,6 @@ extension ResearchEngine {
 }
 
 extension ResearchEngine {
-    func adoptAction(_ action: ClawdyAction) {}
+    func adoptSkill(_ skill: ClawdySkill) {}
+    var lastExecuteSpokenResult: String? { nil }
 }

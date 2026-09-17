@@ -1,62 +1,69 @@
 //
-//  ClawdyAction.swift
+//  ClawdySkill.swift
 //  Clawdy
 //
-//  The CODABLE, USER-EXTENSIBLE definition of a Clawdy ACTION: a longer-running job the
-//  warm voice agent (the ROUTER) can hand off to a separate, dedicated agent process
-//  instead of answering inline — research is the built-in one. An action bundles:
+//  The CODABLE definition of a SKILL the warm voice agent (the ROUTER) can hand a spoken
+//  request to, running it in a separate, dedicated agent process instead of answering
+//  inline. There are two kinds:
 //
-//    • how the router recognizes it (`tag` → the `[TAG]` directive marker, plus the
-//      `whenToRoute` guidance + examples spliced into the warm system prompt), and
-//    • how the dedicated agent runs it (plan/execute/follow-up prompts for `claude`,
-//      the Codex stdin prompts, the tool allowlist, the spend cap, the timeout, and the
-//      deliverable it produces).
+//    • CLAWDY skills — written for Clawdy's interface (voice in, a page or a spoken result
+//      out). They live in the Clawdy dotfiles dir `~/.clawdy/skills/<name>/SKILL.md` and
+//      use the SAME SKILL.md format as Claude Code / Codex skills (frontmatter `name`,
+//      `description`, `allowed-tools`, markdown body) plus optional `clawdy-*` frontmatter
+//      keys for the things only Clawdy needs (the router tag, the deliverable, budget,
+//      timeout, plan phase). `research` is the built-in one and is shipped there on first
+//      launch so it can be read and edited.
+//    • HARNESS skills — the user's ordinary Claude Code (`~/.claude/skills`) or Codex
+//      (`~/.codex/skills`) skills, offered to the router as-is. A harness-skill run asks the
+//      dedicated `claude`/`codex` process to invoke that skill for the task; the CLI loads
+//      the skill itself (the user's setup is on), and the final answer is SPOKEN.
 //
-//  Users TEACH Clawdy new actions (or retune the built-in one) by editing files in the
-//  Clawdy dotfiles directory — `~/.clawdy/actions/<name>/ACTION.md` — see
-//  `ClawdyActionFile` for the on-disk format and `ClawdyActionStore` for loading. The
-//  built-in `research` action below is the single source of truth for today's research
-//  prompts: `ClaudeResearchEngine.planSystemPrompt` & co. read from it, and the shipped
-//  `~/.clawdy/actions/research/ACTION.md` is rendered from it, so all three stay identical.
+//  A skill's `description` is its ROUTING RULE, exactly as it is for Claude Code's own
+//  auto-invocation: it tells the router when a spoken request should go to this skill.
 //
 //  Prompt TEMPLATES may use these placeholders, substituted per run by `render`:
 //    {{task}}        the one-line task the router extracted from the user's words
 //    {{outputPath}}  the ABSOLUTE path of the deliverable file (e.g. …/report.html)
 //    {{outputDir}}   the ABSOLUTE per-run output directory
+//    {{skill}}       the skill's name
 //
 
 import Foundation
 
-struct ClawdyAction: Codable, Equatable {
-    /// What the action produces. v1 supports only a self-contained HTML page; the field
-    /// is reserved so a future "no deliverable" action can be added without a format break.
-    enum DeliverableKind: String, Codable, Equatable {
-        case html
+struct ClawdySkill: Codable, Equatable {
+    enum Kind: String, Codable, Equatable {
+        /// A Clawdy-specific skill from `~/.clawdy/skills` (or the built-in research one).
+        case clawdy
+        /// One of the user's ordinary harness skills (`~/.claude/skills`, `~/.codex/skills`).
+        case harness
     }
 
-    /// Stable identifier — the action's directory name under `~/.clawdy/actions/`.
+    /// What a run produces: a self-contained HTML page opened on screen, or nothing on
+    /// disk — just a spoken result (the default for harness skills).
+    enum DeliverableKind: String, Codable, Equatable {
+        case html
+        case none
+    }
+
+    /// Stable identifier — the skill's directory name.
     var id: String
-    /// Human-readable name (shown in logs / future UI).
+    /// The skill's `name` (frontmatter), defaulting to the directory name.
     var name: String
-    /// The router directive marker WITHOUT brackets, e.g. `RESEARCH` → `[RESEARCH]`.
-    /// Uppercase letters, digits and underscores only; `POINT` and `FOLLOWUP` are reserved.
+    var kind: Kind
+    /// The router directive marker WITHOUT brackets: a Clawdy skill's `clawdy-tag` (or its
+    /// name upper-cased, e.g. `trip-planner` → `TRIP_PLANNER`); a harness skill's is
+    /// `SKILL:<name>`. `POINT` and `FOLLOWUP` are reserved.
     var tag: String
-    /// One-line summary of what the action does (shown to the router).
+    /// The routing rule: WHEN a spoken request should go to this skill (Claude Code's own
+    /// `description` semantics), ideally with examples of the `[TAG] task` line to emit.
     var description: String
-    /// Routing guidance for the warm agent: WHEN to hand a spoken request to this action,
-    /// with examples of the exact `[TAG] task` line to emit.
-    var whenToRoute: String
-    /// The `claude --allowedTools` allowlist for the execute + follow-up phases.
+    /// The `--allowedTools` allowlist for the dedicated `claude` run (`allowed-tools`).
     var tools: [String]
-    /// The `--max-budget-usd` cap for each tool-using `claude` phase.
     var maxBudgetUSD: Double
     /// Whether to run the PLAN/CLARIFY phase first (Claude only; Codex plans inline).
     var planPhase: Bool
-    /// Wall-clock cap on the execute phase.
     var executeTimeoutSeconds: TimeInterval
-    /// What the run produces.
     var deliverable: DeliverableKind
-    /// The deliverable's file name inside the per-run output directory.
     var deliverableFileName: String
 
     // Claude prompts
@@ -66,28 +73,28 @@ struct ClawdyAction: Codable, Equatable {
     /// `--resume`); the user's clarifying answers are prepended by the engine.
     var executeMessageTemplate: String
     var followUpSystemPrompt: String
-    /// The `-p` user message for a follow-up turn; the spoken follow-up is prepended.
     var followUpMessageTemplate: String
     // Codex prompts (Codex has no system-prompt flag; everything goes on stdin)
     var codexExecuteTemplate: String
     var codexFollowUpTemplate: String
 
-    /// The directive marker as the router emits it, e.g. `[RESEARCH]`.
+    /// The directive marker as the router emits it, e.g. `[RESEARCH]` / `[SKILL:pdf]`.
     var directiveMarker: String { "[\(tag)]" }
 
     /// Substitutes the supported placeholders into a prompt template.
-    static func render(_ template: String, task: String, outputPath: String, outputDir: String) -> String {
+    static func render(_ template: String, task: String, outputPath: String, outputDir: String, skill: String = "") -> String {
         template
             .replacingOccurrences(of: "{{task}}", with: task)
             .replacingOccurrences(of: "{{outputPath}}", with: outputPath)
             .replacingOccurrences(of: "{{outputDir}}", with: outputDir)
+            .replacingOccurrences(of: "{{skill}}", with: skill)
     }
 
     /// Tags the router can never be taught: they are the app's own protocol markers.
     static let reservedTags: Set<String> = ["POINT", "FOLLOWUP"]
 
-    /// A valid tag is 1+ uppercase ASCII letters/digits/underscores, starting with a letter,
-    /// and not one of the reserved protocol markers.
+    /// A valid Clawdy-skill tag is uppercase ASCII letters/digits/underscores, starting
+    /// with a letter, and not a reserved protocol marker. (Harness tags are `SKILL:<name>`.)
     static func isValidTag(_ tag: String) -> Bool {
         guard let firstScalar = tag.unicodeScalars.first else { return false }
         let uppercaseLetters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -97,18 +104,96 @@ struct ClawdyAction: Codable, Equatable {
         return allCharactersAllowed && !reservedTags.contains(tag)
     }
 
-    // MARK: - Built-in research action
+    /// Derives a tag from a skill name: `trip-planner` → `TRIP_PLANNER`.
+    static func derivedTag(fromName name: String) -> String {
+        let mapped = name.uppercased().unicodeScalars.map { scalar -> Character in
+            let isAllowed = ("A"..."Z").contains(String(scalar)) || ("0"..."9").contains(String(scalar))
+            return isAllowed ? Character(scalar) : "_"
+        }
+        var tag = String(mapped).trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+        if let first = tag.first, !("A"..."Z").contains(String(first)) { tag = "S_" + tag }
+        return tag.isEmpty ? "SKILL" : tag
+    }
+
+    // MARK: - Harness skills
+
+    static let harnessTagPrefix = "SKILL:"
+
+    /// The tools a harness skill run gets when its SKILL.md declares no `allowed-tools`:
+    /// enough to read, search the web and write inside the scoped run directory — never a
+    /// shell. `Skill` is always added so the model can actually invoke the skill.
+    static let defaultHarnessTools = ["Read", "Grep", "Glob", "WebSearch", "WebFetch", "Write", "Edit"]
+
+    /// Builds the definition for one of the user's ordinary harness skills. The harness
+    /// loads the skill's own instructions itself; Clawdy only tells the dedicated run to
+    /// invoke it for the task and to finish with a short spoken summary.
+    static func harness(name: String, description: String, allowedTools: [String]?) -> ClawdySkill {
+        var tools = allowedTools ?? defaultHarnessTools
+        if !tools.contains("Skill") { tools.insert("Skill", at: 0) }
+        return ClawdySkill(
+            id: name,
+            name: name,
+            kind: .harness,
+            tag: harnessTagPrefix + name,
+            description: description,
+            tools: tools,
+            maxBudgetUSD: builtInResearch.maxBudgetUSD,
+            planPhase: false,
+            executeTimeoutSeconds: builtInResearch.executeTimeoutSeconds,
+            deliverable: .none,
+            deliverableFileName: builtInResearch.deliverableFileName,
+            planSystemPrompt: genericPlanSystemPrompt,
+            executeSystemPrompt: genericExecuteSystemPrompt,
+            executeMessageTemplate: harnessExecuteMessageTemplate,
+            followUpSystemPrompt: genericFollowUpSystemPrompt,
+            followUpMessageTemplate: genericFollowUpMessageTemplate,
+            codexExecuteTemplate: harnessExecuteMessageTemplate,
+            codexFollowUpTemplate: genericFollowUpMessageTemplate
+        )
+    }
+
+    static let harnessExecuteMessageTemplate = """
+    use your `{{skill}}` skill to do this: {{task}}
+
+    do the work yourself, now, in this one turn — invoke the skill and follow its instructions; do not defer to any background job, and do not end your turn waiting to be notified about one. if the skill needs input i haven't given, make a reasonable assumption and say what you assumed. any file you write goes in {{outputDir}}. finish with a short spoken summary of what you did or found — one to three sentences, plain speech, no markdown, no long tool output — because it will be read aloud.
+    """
+
+    // MARK: - Generic prompts for skills that don't spell out every phase
+
+    static let genericPlanSystemPrompt = """
+    you are clawdy's agent, in its PLANNING phase, about to run a skill the user asked for by voice. you are in plan mode and cannot run tools yet.
+
+    decide whether you genuinely need clarifying information to do a great job. if and only if essential details are missing, ask at MOST 3 short, specific clarifying questions, then stop and end your turn. if the request is already clear enough, do NOT ask any questions — instead briefly state the plan you'll execute. never ask more than once. either way, END YOUR TURN NOW — do not wait on anything.
+
+    CRITICAL EXECUTION MODEL: in the upcoming execution phase you will do ALL of the work YOURSELF, inline, in a single one-shot turn, with the tools you've been granted. there is NO background job system here and NO notification will ever arrive, so do NOT plan to delegate to any background task, workflow, agent, sub-agent, or task queue.
+    """
+
+    static let genericExecuteSystemPrompt = """
+    you are clawdy's agent, in its EXECUTION phase, running a skill the user asked for by voice. do ALL of the work YOURSELF, inline, in THIS one turn, with the tools you've been granted. this is a one-shot run with NO background job system and NO notification will ever arrive — anything you hand off never comes back — so do NOT invoke, launch, spawn, or delegate to any background task, workflow, agent, sub-agent, or task queue, and do NOT end your turn waiting to be notified. if you write a page, keep all of its own code inline (inline <style> only, no external scripts, no CDN, no remote fonts). when you're done, finish with a short plain-speech summary suitable to read aloud.
+    """
+
+    static let genericFollowUpSystemPrompt = """
+    you are clawdy's agent, continuing a FINISHED run by voice. the user is asking a spoken follow-up. only change any file you produced if the user explicitly asks; otherwise just answer their question. do the work inline in THIS one turn — do not defer to any background job. end your turn with a concise 1-2 sentence spoken answer or confirmation suitable to read aloud — never read long tool logs or file contents aloud.
+    """
+
+    static let genericFollowUpMessageTemplate = """
+    only change what you produced earlier if I asked you to; otherwise just answer my question. anything you write goes in {{outputDir}}. keep it short: end with a 1-2 sentence spoken summary/answer suitable to read aloud, and don't read long tool output or file contents aloud.
+    """
+
+    // MARK: - Built-in research skill
 
     static let builtInResearchID = "research"
 
-    /// The one built-in action. Its prompt text is EXACTLY what the research subsystem
-    /// shipped with before actions became editable (see the file header).
-    static let builtInResearch = ClawdyAction(
+    /// The one built-in Clawdy skill. Its prompt text is EXACTLY what the research
+    /// subsystem shipped with before skills became editable (see the file header).
+    static let builtInResearch = ClawdySkill(
         id: builtInResearchID,
-        name: "Research",
+        name: "research",
+        kind: .clawdy,
         tag: "RESEARCH",
-        description: "deep, multi-source web research that ends in ONE self-contained HTML page opened on the user's screen.",
-        whenToRoute: """
+        description: """
+        deep, multi-source web research that ends in ONE self-contained HTML page opened on the user's screen. use when the request needs gathering information from across the web or multiple sources, is multi-step or open-ended, or asks for a compiled artifact (a page, gallery, list, comparison, or report).
+
         so these ROUTE, because each needs web gathering and/or a compiled result: "find photos of aomori", "find the best noise-cancelling headphones", "gather everything on the tohoku earthquake", "put together a page of ramen spots in tokyo", "compare the top three standing desks and build a page". and these you ANSWER yourself, because each is immediately answerable in a sentence or two: "what's the capital of japan", "what does this error mean", "how do i center a div", "where do i click to submit". notice "find/gather/compile X" that lives out on the web is research even when the user never literally says "build a page" — the deliverable is implied.
 
         examples:

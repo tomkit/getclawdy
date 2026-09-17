@@ -57,9 +57,10 @@ final class ResearchSession {
     /// The task this run is researching, shown (truncated) as the pill title and used
     /// as the results-window title.
     let taskDescription: String
-    /// The action this run executes (built-in research unless the router chose a
-    /// user-defined one). Handed to the engine via `adoptAction` before any phase runs.
-    let action: ClawdyAction
+    /// The skill this run executes (built-in research unless the router chose another
+    /// Clawdy skill or a harness skill). Handed to the engine via `adoptSkill` before any
+    /// phase runs.
+    let skill: ClawdySkill
 
     private(set) var state: State = .idle
 
@@ -190,7 +191,7 @@ final class ResearchSession {
     init(
         sessionID: ResearchSessionID,
         taskDescription: String,
-        action: ClawdyAction = .builtInResearch,
+        skill: ClawdySkill = .builtInResearch,
         resolveEngineSelection: @escaping () -> ResearchEngineSelection?,
         makeEngine: @escaping (CoachEngineKind, String) -> ResearchEngine = { _, binaryPath in
             ClaudeResearchEngine(binaryPath: binaryPath)
@@ -203,7 +204,7 @@ final class ResearchSession {
     ) {
         self.sessionID = sessionID
         self.taskDescription = taskDescription
-        self.action = action
+        self.skill = skill
         self.resolveEngineSelection = resolveEngineSelection
         self.makeEngine = makeEngine
         self.applicationSupportDirectory = applicationSupportDirectory
@@ -237,9 +238,9 @@ final class ResearchSession {
         // session id; Codex keys the dir by the client run id and has no transcript path
         // until its thread id is known).
         let engine = makeEngine(engineSelection.kind, engineSelection.binaryPath)
-        // Hand the engine the action BEFORE any phase runs so its prompts, tool allowlist
-        // and deliverable name are the action's (a no-op for engines with fixed prompts).
-        engine.adoptAction(action)
+        // Hand the engine the skill BEFORE any phase runs so its prompts, tool allowlist
+        // and deliverable are the skill's (a no-op for engines with fixed prompts).
+        engine.adoptSkill(skill)
 
         let outputDirectory: URL
         do {
@@ -277,7 +278,7 @@ final class ResearchSession {
             workingDir: outputDirectory.path,
             transcriptPath: resolvedTranscriptPath ?? "",
             engineKind: engineSelection.kind,
-            actionID: action.id
+            skillID: skill.id
         )
 
         // The directive was accepted and a run is committed — play the acknowledge
@@ -731,20 +732,29 @@ final class ResearchSession {
                 }
             )
             guard !Task.isCancelled else { return }
-            completedDeliverableURL = deliverableURL
+            // A skill with no on-disk deliverable (a harness skill, or a Clawdy skill with
+            // `clawdy-deliverable: none`) has nothing to open: keep `completedDeliverableURL`
+            // nil (so "view results" is a no-op and History offers the transcript instead)
+            // and SPEAK the run's final answer through the same TTS channel a follow-up uses.
+            let hasDeliverable = skill.deliverable != .none
+            completedDeliverableURL = hasDeliverable ? deliverableURL : nil
             state = .completed
             currentRunTask = nil
             manifestStore.recordResearchSessionOutcome(
                 sessionId: sessionID,
                 status: .completed,
-                deliverablePath: deliverableURL.path
+                deliverablePath: hasDeliverable ? deliverableURL.path : nil
             )
+            if !hasDeliverable {
+                let spokenResult = engine.lastExecuteSpokenResult?.trimmingCharacters(in: .whitespacesAndNewlines)
+                onFollowUpAnswerReady?((spokenResult?.isEmpty == false) ? spokenResult! : Self.skillFinishedWithoutAnswerSpokenMessage)
+            }
             // For an engine that learns its transcript path only POST-HOC (Codex, once its
             // execute turn captured a thread id), fill it into the manifest now so History
             // can surface the transcript. A no-op for Claude (already resolved at start).
             resolveLateTranscriptPathIfNeeded(engine: engine, outputDirectory: outputDirectory)
             audioCuePlayer.play(.done)
-            overlayState.markCompleted()
+            overlayState.markCompleted(hasDeliverable: hasDeliverable)
             pushOverlayStateToViewModel()
             finalizeTranscriptFeed()
             notifyLifecycleChanged()
@@ -795,6 +805,10 @@ final class ResearchSession {
     /// follow-up answer uses (`onFollowUpAnswerReady`).
     nonisolated static let followUpTransientFailureSpokenMessage =
         "Sorry, that follow-up didn't go through. Please try again."
+
+    /// Spoken when a no-deliverable skill run finished but produced no final text.
+    nonisolated static let skillFinishedWithoutAnswerSpokenMessage =
+        "Done. The skill finished, but didn't say anything back."
 
     /// Handles a FOLLOW-UP-turn failure. This is DELIBERATELY separate from the initial
     /// run's `handleRunFailure`: an initial execute/plan failure produced NO deliverable

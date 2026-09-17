@@ -63,7 +63,40 @@ Optional: add an [ElevenLabs](https://elevenlabs.io) key in the menu-bar panel f
 - **Your CLI, your tokens.** Clawdy shells out to the `claude` or `codex` binary on your machine. Every answer is billed to the subscription that CLI is signed into. No API keys, no proxy, no backend.
 - **Your whole setup comes along.** Clawdy runs your CLI as-is, so the CLAUDE.md, skills, plugins, hooks, and MCP servers you've configured in your harness all load, exactly as they do in your terminal.
 - **Pick it up in the shell whenever you want.** Clawdy drives a real CLI session, so you can resume any conversation in the terminal with `claude --resume <id>` or `codex resume <id>` (there's a "Resume in Terminal" button in the History window).
-- **Teach it new actions.** The routing rules and the research prompts live in plain files under `~/.clawdy/actions/`. Edit `research/ACTION.md` to retune research, or add `<name>/ACTION.md` (a tag, a "when to use this" section, and what to do) to give Clawdy a new long-running job. Changes apply on your next question. The README in that folder has the format.
+- **It runs your skills.** Your ordinary Claude Code skills (`~/.claude/skills`) are offered to Clawdy's router as-is, and you can write Clawdy-specific ones in `~/.clawdy/skills` using the same `SKILL.md` format. See [Skills and routing](#skills-and-routing).
+
+## Skills and routing
+
+Every question you ask goes to the warm voice agent first. It is also the **router**: based on the loaded skills, it either answers out loud right away, or hands the request to a skill that runs in its own agent process. Its decision rule is the same one a coding agent uses to decide between just doing a task and stopping to plan: quick, single-step, answerable-now questions are answered inline; anything that needs gathering from the web, several steps, a built artifact, or clearly matches a skill's description gets routed. On-screen pointing questions ("where do I click?") are always answered inline, never routed.
+
+Routing is a one-line reply from the agent that Clawdy intercepts instead of speaking:
+
+```
+[RESEARCH] compare the three best standing desks under $1000 and build a page
+[SKILL:pdf] summarize the PDF that's open
+```
+
+**Two kinds of skills are available:**
+
+- **Your harness skills.** Anything in `~/.claude/skills/*/SKILL.md` (or `~/.codex/skills` when Codex is selected). Nothing to configure: the skill's `description` is the routing rule, exactly as it is for the CLI's own auto-invocation, and its `allowed-tools` govern the run. Clawdy starts a dedicated `claude -p` run that invokes the skill for your task, then **speaks the result back**. Requires "Use my Claude Code setup" to be on (the default).
+- **Clawdy skills.** Skills written for Clawdy's interface (voice in; a page on your screen or a spoken answer out), in `~/.clawdy/skills/<name>/SKILL.md`. Same format, plus optional `clawdy-*` frontmatter keys. The built-in `research` skill is written there on first launch; edit it to retune research, or add a folder to teach Clawdy something new. Changes apply on your next question.
+
+A minimal Clawdy skill:
+
+```markdown
+---
+name: trip-planner
+description: plans a multi-day trip and builds an itinerary page. use for "plan me N days in <place>". example — user says "plan me 3 days in kyoto": [TRIP_PLANNER] plan a 3-day kyoto itinerary.
+allowed-tools: WebSearch, WebFetch, Write
+clawdy-deliverable: html      # or `none` for a spoken result
+---
+
+Plan the trip {{task}} and write ONE self-contained HTML page to {{outputPath}}.
+```
+
+Only `description` is required; the body is what the agent does. For full control over each phase (plan / execute / follow-up, Claude and Codex variants) split the body into `## Plan`, `## Execute`, `## Execute message`, `## Follow-up`, `## Follow-up message`, `## Codex execute`, `## Codex follow-up`, the way `research/SKILL.md` does. Placeholders: `{{task}}`, `{{outputPath}}`, `{{outputDir}}`, `{{skill}}`. `POINT` and `FOLLOWUP` are reserved markers.
+
+How a routed run works: a page-producing skill runs a plan/clarify phase (it may ask you one round of questions) and then an execute phase with a narrow tool allowlist, a spend cap, and a scoped output directory; the page opens in Clawdy's results window and you can keep talking to it. A spoken-result skill runs one execute turn and reads its final answer aloud. Either way the run is a real CLI session you can resume in the terminal.
 
 ## Build from source
 
