@@ -13,9 +13,9 @@ import AVFoundation
 @testable import Clawdy
 
 struct AcknowledgementCueScheduleTests {
-    @Test func instantAcknowledgementThenFillersNoEarlierThanThreeSeconds() {
+    @Test func acknowledgementAfterABeatThenFillersNoEarlierThanThreeSeconds() {
         let schedule = AcknowledgementCueSchedule.default
-        #expect(schedule.first?.delaySeconds == 0, "an instant spoken acknowledgement, not a sound effect")
+        #expect(schedule.first?.delaySeconds == 1.0, "a spoken acknowledgement a natural beat after the keys come up, not the instant they do")
         let laterDelays = schedule.dropFirst().map(\.delaySeconds)
         #expect(laterDelays.min()! >= 3.0, "a filler before ~3s would collide with an easy answer's first audio (~2–2.5s)")
         #expect(laterDelays == laterDelays.sorted())
@@ -71,6 +71,28 @@ struct SpokenCueArbiterTests {
         arbiter.turnEnded()
         #expect(arbiter.scheduledFillerCountForTesting == 0, "a routed/failed turn drops them too")
     }
+
+    /// A research hand-off must produce exactly ONE acknowledgement, whichever comes first.
+    @Test func researchStartIsSkippedWhenTheTurnWasAlreadyAcknowledgedAndReplacesItOtherwise() {
+        let renderer = AcknowledgementCueRenderer(cacheRootDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("no-cues"))
+        let arbiter = SpokenCueArbiter(schedule: [.init(delaySeconds: 5, phrases: ["mm-hm."])], renderer: renderer)
+        arbiter.setVoice(.apple(voiceIdentifier: nil))
+        arbiter.setReplyOrRecordingActive(true)   // announcements queue, so they're countable
+
+        // "mm-hm" already spoken → "on it" is dropped.
+        arbiter.beginTurn()
+        arbiter.markAcknowledgementSpokenForTesting()
+        arbiter.announceResearchStart("on it.")
+        #expect(arbiter.queuedAnnouncementCountForTesting == 0)
+
+        // Router was quicker than the 1 s beat → the pending "mm-hm" is cancelled and "on it" stands in.
+        arbiter.beginTurn()
+        #expect(arbiter.scheduledFillerCountForTesting == 1)
+        arbiter.announceResearchStart("on it.")
+        #expect(arbiter.scheduledFillerCountForTesting == 0, "the pending acknowledgement is cancelled")
+        #expect(arbiter.queuedAnnouncementCountForTesting == 1, "the research line is the acknowledgement")
+        #expect(arbiter.hasSpokenAcknowledgementThisTurnForTesting)
+    }
 }
 
 @MainActor
@@ -91,7 +113,7 @@ struct SpokenCueSurvivalTests {
         let manager = CompanionManager(loadElevenLabsAPIKeyFromKeychain: { nil }, localTTSClient: SilentFakeTTSClient())
         manager.setSelectedTTSEngineForTesting(.apple)
         manager.simulateReleaseThenRequestStartForTesting()
-        #expect(manager.scheduledCueFillerCountForTesting == 3, "the 3 s / 8 s / 15 s fillers are still armed after the request started")
+        #expect(manager.scheduledCueFillerCountForTesting == 4, "the 1 s ack and the 3 s / 8 s / 15 s fillers are still armed after the request started")
         manager.cancelQuickAnswer()
         #expect(manager.scheduledCueFillerCountForTesting == 0, "a real Stop cancels them")
     }

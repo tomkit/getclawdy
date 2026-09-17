@@ -9,7 +9,7 @@
 //  resort when the model can't load (missing/corrupt file, an unsupported machine).
 //
 //  Latency shape: synthesis runs on the `KokoroSynthesizer` actor (never the main thread)
-//  at roughly 0.25–0.6× real time depending on the machine. `StreamingResponseSpeaker`
+//  at roughly 0.25× real time on Apple silicon (the fp16 model; int8 measured 2.4× slower here). `StreamingResponseSpeaker`
 //  calls `prepareClip` the moment a sentence completes, so sentence N+1 is synthesized
 //  WHILE sentence N plays; `speak(preparedClip:)` then waits for the cue gate and starts
 //  playback. Playback goes through `AVAudioPlayer` from in-memory WAV bytes (the same
@@ -23,7 +23,7 @@ import Foundation
 @MainActor
 final class KokoroTTSClient: NSObject, SpeechTTSProviding {
     /// The bundled model file name (see `scripts/fetch-models.sh`).
-    static let bundledModelFileName = "kokoro-v1.0.int8"
+    static let bundledModelFileName = "kokoro-v1.0.fp16"
 
     /// Where the app bundle keeps the model, or nil when it was not bundled.
     nonisolated static var bundledModelURL: URL? {

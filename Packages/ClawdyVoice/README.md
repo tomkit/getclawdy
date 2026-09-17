@@ -19,7 +19,7 @@ Kokoro-82M speech model on ONNX Runtime. No network, no key, no espeak.
   the 510-token chunker, voice loading, and the `[word](/phonemes/)` pronunciation-override pass.
 - `SpokenTextNormalizer.swift` — reply text → speakable words (markdown, URLs, times, key chords).
 - `Resources/voices/` — six Kokoro voices as raw float32 style tables (Heart is the default).
-  The model file itself (`kokoro-v1.0.int8.onnx`) lives in the app at `Clawdy/Models/`, fetched by
+  The model file itself (`kokoro-v1.0.fp16.onnx`) lives in the app at `Clawdy/Models/`, fetched by
   `scripts/fetch-models.sh`.
 
 ## Tools
@@ -33,4 +33,4 @@ swift test                                                  # G2P references + i
 
 The reference fixtures under `Tests/ClawdyVoiceTests/Fixtures` were produced with Python
 `misaki` 0.9 (lexicon path), `transformers` on the same BART weights (fallback network) and
-`kokoro-onnx` 0.6 (a raw waveform). Regenerate them if the lexicon or weights change.
+`kokoro-onnx` 0.6 with the fp16 model (a raw waveform). Regenerate them if the lexicon or weights change.

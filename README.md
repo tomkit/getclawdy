@@ -104,7 +104,7 @@ You need macOS 14.2+ and Xcode 16+. Point the command line tools at it: `sudo xc
 ```bash
 git clone https://github.com/tomkit/getclawdy.git
 cd getclawdy
-./scripts/fetch-models.sh   # downloads the ~90 MB Kokoro voice model into Clawdy/Models/ (once)
+./scripts/fetch-models.sh   # downloads the ~170 MB Kokoro voice model into Clawdy/Models/ (once)
 open Clawdy.xcodeproj
 ```
 

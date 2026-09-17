@@ -16,7 +16,7 @@ final class KokoroSynthesizerTests: XCTestCase {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Clawdy/Models/kokoro-v1.0.int8.onnx")
+            .appendingPathComponent("Clawdy/Models/kokoro-v1.0.fp16.onnx")
     }
 
     private func fixtureURL(_ name: String) throws -> URL {

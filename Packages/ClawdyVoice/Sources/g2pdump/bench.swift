@@ -4,7 +4,7 @@ import ClawdyVoice
 /// `swift run -c release g2pdump --bench` — times G2P init, session load, prewarm and synthesis.
 func runBenchmark() async {
     let modelURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Clawdy/Models/kokoro-v1.0.int8.onnx")
+        .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Clawdy/Models/kokoro-v1.0.fp16.onnx")
     func timed<T>(_ label: String, _ work: () async throws -> T) async rethrows -> T {
         let start = Date()
         let result = try await work()

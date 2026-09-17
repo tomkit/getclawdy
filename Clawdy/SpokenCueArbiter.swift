@@ -28,6 +28,9 @@ final class SpokenCueArbiter {
     private var cuePlayer: AVAudioPlayer?
     private var replyHasBegun = false
     private var turnHasEnded = true
+    /// Whether this turn's acknowledgement ("mm-hm") has already been spoken, so a research
+    /// hand-off doesn't add a second one ("on it…") right behind it.
+    private var hasSpokenAcknowledgementThisTurn = false
     /// True while the reply is speaking or the user is recording: announcements queue.
     private var isReplyOrRecordingActive = false
     private var queuedAnnouncements: [String] = []
@@ -56,9 +59,12 @@ final class SpokenCueArbiter {
         cancelTurn()
         turnHasEnded = false
         replyHasBegun = false
-        for step in schedule {
+        hasSpokenAcknowledgementThisTurn = false
+        for (stepIndex, step) in schedule.enumerated() {
+            let isAcknowledgementStep = stepIndex == 0
             if step.delaySeconds == 0 {
                 play(from: step.phrases)
+                if isAcknowledgementStep { hasSpokenAcknowledgementThisTurn = true }
                 continue
             }
             let delayNanoseconds = UInt64(step.delaySeconds * 1_000_000_000)
@@ -69,6 +75,7 @@ final class SpokenCueArbiter {
                     step: step, replyHasBegun: self.replyHasBegun, turnHasEnded: self.turnHasEnded
                 ) else { return }
                 self.play(from: step.phrases)
+                if isAcknowledgementStep { self.hasSpokenAcknowledgementThisTurn = true }
             })
         }
     }
@@ -116,6 +123,17 @@ final class SpokenCueArbiter {
 
     // MARK: - Announcements (research start / done / error)
 
+    /// A research run is starting from this turn: ONE acknowledgement, not two. If the
+    /// turn's "mm-hm" already played, the "on it…" line is skipped; if it hadn't fired yet
+    /// (the router was quick), it's cancelled and the research line IS the acknowledgement.
+    func announceResearchStart(_ phrase: String) {
+        let alreadyAcknowledged = hasSpokenAcknowledgementThisTurn
+        turnEnded()
+        guard !alreadyAcknowledged else { return }
+        hasSpokenAcknowledgementThisTurn = true
+        announce(phrase)
+    }
+
     /// Speaks `phrase` now if nothing else is speaking, else after the reply/recording ends.
     func announce(_ phrase: String) {
         if isReplyOrRecordingActive || isCuePlaying {
@@ -127,6 +145,9 @@ final class SpokenCueArbiter {
     }
 
     var queuedAnnouncementCountForTesting: Int { queuedAnnouncements.count }
+    var hasSpokenAcknowledgementThisTurnForTesting: Bool { hasSpokenAcknowledgementThisTurn }
+    /// Marks the turn's acknowledgement as spoken (as the scheduled step would).
+    func markAcknowledgementSpokenForTesting() { hasSpokenAcknowledgementThisTurn = true }
     var scheduledFillerCountForTesting: Int { scheduledTasks.count }
 
     // MARK: - Playback
@@ -186,6 +207,11 @@ final class SpokenResearchAudioCuePlayer: ResearchAudioCuePlayer {
     private let arbiter: SpokenCueArbiter
     init(arbiter: SpokenCueArbiter) { self.arbiter = arbiter }
     func play(_ cue: ResearchAudioCue) {
-        arbiter.announce(ResearchSpokenCue.phrase(for: cue))
+        let phrase = ResearchSpokenCue.phrase(for: cue)
+        if cue == .acknowledge {
+            arbiter.announceResearchStart(phrase)
+        } else {
+            arbiter.announce(phrase)
+        }
     }
 }
