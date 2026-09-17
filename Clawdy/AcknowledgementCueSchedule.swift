@@ -7,11 +7,11 @@
 //  thresholds (≈0.1s: feels instant; ≈1s: flow kept; ≈10s: attention lost). Every cue is
 //  VOICE, in the reply's own voice — never a sound effect:
 //
-//    t ≈ 1s     a micro-acknowledgement ("okay.") — a beat after the keys come up, the
+//    t ≈ 1s     an acknowledgement ("let me check.") — a beat after the keys come up, the
 //               way a listener nods after you finish, not the instant you stop; the
 //               pre-rendered clip makes the timing exact. Real WORDS only: the
 //               interjections ("mm-hm", "hmm") come out garbled from the model.
-//    t ≈ 3s     a short filler ("hmm, let me look.")
+//    t ≈ 3s     a short filler ("checking now.")
 //    t ≈ 8s     a progress line ("still checking.")
 //    t ≈ 15s    a longer-wait line ("this one's taking a bit.")
 //
@@ -35,8 +35,9 @@ enum AcknowledgementCueSchedule {
     // an assistant who's listening, not a status line. Real words only (interjections
     // like "mm-hm"/"hmm" come out garbled from the model).
     static let `default`: [Step] = [
-        Step(delaySeconds: 1.0, phrases: ["okay.", "got it.", "sure.", "alright."]),
-        Step(delaySeconds: 3.0, phrases: ["let me check.", "let me take a look.", "one moment."]),
+        // Users are almost always asking something, so the nod is "let me check", not "okay".
+        Step(delaySeconds: 1.0, phrases: ["let me check.", "let me take a look.", "let me see.", "one moment."]),
+        Step(delaySeconds: 3.0, phrases: ["checking now.", "looking into it.", "just a second."]),
         Step(delaySeconds: 8.0, phrases: ["still checking.", "still looking, bear with me.", "almost there."]),
         Step(delaySeconds: 15.0, phrases: ["this is taking a little longer than usual, hang tight.", "still working on it."])
     ]

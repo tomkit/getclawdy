@@ -102,14 +102,14 @@ struct KeychainAccessGatingTests {
     ///
     /// The speaker is given the REAL accessor as its key provider and the store seam
     /// is installed, so any read — accessor or direct static — would be observed.
-    @Test func speakingUnderAppleTTSNeverReadsTheElevenLabsSecret() async {
-        let spy = KeychainReadSpy(returning: "sk_fake_apple")
+    @Test func speakingUnderKokoroNeverReadsTheElevenLabsSecret() async {
+        let spy = KeychainReadSpy(returning: "sk_fake_kokoro")
         TTSKeychainStore.overrideSecretReaderForTesting = spy.read
         defer { TTSKeychainStore.overrideSecretReaderForTesting = nil }
         let speaker = StreamingResponseSpeaker(
-            provider: .apple,
-            appleTTSClient: LocalSpeechTTSClient(),
+            provider: .kokoro,
             elevenLabsTTSClient: ElevenLabsTTSClient(),
+            kokoroTTSClient: makeMutedKokoroTTSClient(),
             elevenLabsAPIKeyProvider: TTSKeychainStore.loadAPIKey,
             elevenLabsVoiceID: ElevenLabsAPI.defaultVoiceID,
             onPlaybackStarted: {}
@@ -119,24 +119,24 @@ struct KeychainAccessGatingTests {
         speaker.finish(finalRemainder: nil, fullSpokenText: "Tokyo is the capital of Japan.")
 
         // Let the utterance chain fully drain, then assert the secret was untouched.
-        await pollUntilTrue(timeoutSeconds: 5, "Apple TTS utterance to finish") { [speaker] in
+        await pollUntilTrue(timeoutSeconds: 15, "the built-in voice's utterance to finish") { [speaker] in
             !speaker.isSpeaking
         }
         #expect(spy.readCount == 0)
     }
 
     /// #3 — Speaking under ElevenLabs reads the secret ON-DEMAND (only when actually
-    /// synthesizing). A missing key (spy returns nil) must still fall back to Apple
+    /// synthesizing). A missing key (spy returns nil) must still fall back to the built-in voice
     /// without the speaker throwing — preserving the "a TTS/keychain error never
     /// breaks a spoken answer" guarantee.
     @Test func speakingUnderElevenLabsReadsTheSecretOnDemandThenFallsBack() async {
-        let spy = KeychainReadSpy(returning: nil) // no key → must fall back to Apple
+        let spy = KeychainReadSpy(returning: nil) // no key → must fall back to Kokoro
         TTSKeychainStore.overrideSecretReaderForTesting = spy.read
         defer { TTSKeychainStore.overrideSecretReaderForTesting = nil }
         let speaker = StreamingResponseSpeaker(
             provider: .elevenLabs,
-            appleTTSClient: LocalSpeechTTSClient(),
             elevenLabsTTSClient: ElevenLabsTTSClient(),
+            kokoroTTSClient: makeMutedKokoroTTSClient(),
             elevenLabsAPIKeyProvider: TTSKeychainStore.loadAPIKey,
             elevenLabsVoiceID: ElevenLabsAPI.defaultVoiceID,
             onPlaybackStarted: {}

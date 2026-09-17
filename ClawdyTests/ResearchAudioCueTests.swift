@@ -227,7 +227,7 @@ struct SpokenResearchAudioCuePlayerTests {
 
     @MainActor @Test func announcementsWaitWhileTheReplyIsActive() {
         let arbiter = SpokenCueArbiter(renderer: AcknowledgementCueRenderer(cacheRootDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("no-cues")))
-        arbiter.setVoice(.apple(voiceIdentifier: nil))
+        arbiter.setVoice(.kokoro(voiceID: "af_heart"))
         let player = SpokenResearchAudioCuePlayer(arbiter: arbiter)
         arbiter.setReplyOrRecordingActive(true)
         player.play(.done)

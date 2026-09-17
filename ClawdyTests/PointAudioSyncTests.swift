@@ -15,18 +15,6 @@ import Foundation
 import CoreGraphics
 @testable import Clawdy
 
-/// A TTS provider that speaks but produces NO character timing — stands in for Apple TTS
-/// (or any provider using the protocol default `speakTextReportingTiming`), to prove the
-/// graceful-degradation path.
-@MainActor
-final class FakeNoTimingTTSClient: SpeechTTSProviding {
-    private(set) var spokenTexts: [String] = []
-    func speakText(_ text: String) async throws { spokenTexts.append(text) }
-    var isPlaying: Bool { false }
-    func stopPlayback() {}
-    // Deliberately does NOT override speakTextReportingTiming — it uses the protocol
-    // default, which speaks via speakText and returns SpokenClipTiming.none.
-}
 
 /// Collects the clip reports the streaming speaker emits, so a test can assert a report is
 /// emitted even when a clip falls back to Apple (BLOCKER 3 — the anti-hang guarantee).
@@ -307,16 +295,17 @@ struct PointAudioSyncTests {
 
     // MARK: - Graceful degradation (no alignment -> untimed sequence)
 
-    /// A provider WITHOUT timing (Apple TTS, or any provider that uses the protocol
+    /// A provider WITHOUT timing (the built-in Kokoro voice, which uses the protocol
     /// default) still speaks, but reports NO alignment and NO playhead — the signal
     /// `CompanionManager` uses to fall back to the untimed, fixed-dwell pointing sequence.
     @MainActor
     @Test func providerWithoutTimingSpeaksButReportsNoAlignmentSoPointingDegrades() async throws {
-        let fake = FakeNoTimingTTSClient()
-        let timing = try await fake.speakTextReportingTiming("point at the run button")
+        let kokoro = makeMutedKokoroTTSClient()
+        let timing = try await kokoro.speakTextReportingTiming("point at the run button")
 
         // It DID speak (audio still plays)...
-        #expect(fake.spokenTexts == ["point at the run button"])
+        #expect(kokoro.spokenTextsForTesting == ["point at the run button"])
+        kokoro.stopPlayback()
         // ...but produced no alignment/playhead, so audio-sync is impossible → degrade.
         #expect(timing.alignment == nil)
         #expect(timing.playheadSecondsReader == nil)
@@ -342,20 +331,20 @@ struct PointAudioSyncTests {
         #expect(manager.pointingAdvanceIsAudioSynced == false)
     }
 
-    /// BLOCKER 3: when an ElevenLabs-intended clip fails and falls back to Apple, the speaker
-    /// STILL emits a clip report (with no alignment). Without it, the manager's scheduler
-    /// would wait ~12s for a report that never comes and strand the cursor. Here the
-    /// ElevenLabs client has no key, so clip 0 throws `missingAPIKey` and falls back to Apple
-    /// — and we assert a report is emitted PROMPTLY with nil alignment.
+    /// BLOCKER 3: when an ElevenLabs-intended clip fails and falls back to the built-in
+    /// voice, the speaker STILL emits a clip report (with no alignment). Without it, the
+    /// manager's scheduler would wait ~12s for a report that never comes and strand the
+    /// cursor. Here the ElevenLabs client has no key, so clip 0 throws `missingAPIKey` and
+    /// falls back to Kokoro — and we assert a report is emitted with nil alignment.
     @MainActor
-    @Test func clipFallingBackToAppleStillReportsSoTheCursorNeverHangs() async {
+    @Test func clipFallingBackToKokoroStillReportsSoTheCursorNeverHangs() async {
         let collector = ClipReportCollector()
-        let fakeApple = FakeNoTimingTTSClient()
+        let kokoro = makeMutedKokoroTTSClient()
         let speaker = StreamingResponseSpeaker(
             provider: .elevenLabs,
-            appleTTSClient: fakeApple,
             elevenLabsTTSClient: ElevenLabsTTSClient(),
-            // No key → ElevenLabs throws missingAPIKey → the clip falls back to Apple.
+            kokoroTTSClient: kokoro,
+            // No key → ElevenLabs throws missingAPIKey → the clip falls back to Kokoro.
             elevenLabsAPIKeyProvider: { nil },
             elevenLabsVoiceID: "voice",
             onPlaybackStarted: {},
@@ -370,8 +359,8 @@ struct PointAudioSyncTests {
         #expect(collector.reports.count >= 1)
         // ...and it carries NO alignment, so the scheduler degrades to the untimed walk.
         #expect(collector.reports.first?.timing.alignment == nil)
-        // The chunk really was spoken through Apple.
-        #expect(fakeApple.spokenTexts.contains("click the run button."))
+        // The chunk really was spoken through the built-in voice.
+        #expect(kokoro.spokenTextsForTesting.contains("click the run button."))
     }
 
     // MARK: - Tunables live in one place

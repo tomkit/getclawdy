@@ -150,7 +150,7 @@ final class ElevenLabsTTSClient: NSObject, SpeechTTSProviding {
                 )
             } catch {
                 // The user spoke again — abort, don't burn the fallback on a stale turn.
-                if !TTSProviderSelection.shouldFallBackToApple(for: error) { throw error }
+                if !TTSProviderSelection.shouldFallBackToLocalVoice(for: error) { throw error }
                 lastError = error
                 currentModelID = ElevenLabsAPI.nextTimestampModel(after: modelID)
             }

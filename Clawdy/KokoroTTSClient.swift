@@ -3,10 +3,10 @@
 //  Clawdy
 //
 //  Clawdy's built-in voice: Kokoro-82M running on-device through the `ClawdyVoice` package
-//  (ONNX Runtime + the Misaki G2P). Conforms to `SpeechTTSProviding` like the Apple and
-//  ElevenLabs clients, so the manager and `StreamingResponseSpeaker` speak through it the
-//  same way. The DEFAULT provider; Apple's `AVSpeechSynthesizer` is only the invisible last
-//  resort when the model can't load (missing/corrupt file, an unsupported machine).
+//  (ONNX Runtime + the Misaki G2P). Conforms to `SpeechTTSProviding` like the ElevenLabs
+//  client, so the manager and `StreamingResponseSpeaker` speak through it the same way.
+//  The DEFAULT provider and the only local voice: if the model can't load (missing/corrupt
+//  file) speaking throws, the failure is logged, and the turn is silent.
 //
 //  Latency shape: synthesis runs on the `KokoroSynthesizer` actor (never the main thread)
 //  at roughly 0.25× real time on Apple silicon (the fp16 model; int8 measured 2.4× slower here). `StreamingResponseSpeaker`
@@ -41,8 +41,16 @@ final class KokoroTTSClient: NSObject, SpeechTTSProviding {
     /// synthesis, so the model's work overlaps the acknowledgement instead of waiting for it.
     var playbackGate: (@MainActor () async -> Void)?
 
-    /// Set once the model failed to load; provider resolution then falls back to Apple.
+    /// Set once the model failed to load (the app then runs voiceless; the text still lands
+    /// in the panel).
     private(set) var didFailToLoad = false
+
+    /// Playback gain, 0…1. Tests set 0 so the REAL synthesizer runs end to end without
+    /// sound coming out of the machine.
+    var playbackVolume: Float = 1
+
+    /// Every clip text handed to playback, in order (for tests).
+    private(set) var spokenTextsForTesting: [String] = []
 
     private var synthesizerTask: Task<KokoroSynthesizer?, Never>?
     private var currentPlayer: AVAudioPlayer?
@@ -65,7 +73,7 @@ final class KokoroTTSClient: NSObject, SpeechTTSProviding {
                 await synthesizer.prewarm()
                 return synthesizer
             } catch {
-                print("⚠️ Kokoro voice unavailable, falling back to Apple TTS: \(error)")
+                print("⚠️ Built-in voice unavailable: \(error)")
                 return nil
             }
         }
@@ -137,6 +145,7 @@ final class KokoroTTSClient: NSObject, SpeechTTSProviding {
         try Task.checkCancellation()
         currentPlayer?.stop()
         play(wavData)
+        spokenTextsForTesting.append(preparedClip.text)
         print("🔊 Kokoro TTS: speaking \(preparedClip.text.count) characters")
     }
 
@@ -164,6 +173,7 @@ final class KokoroTTSClient: NSObject, SpeechTTSProviding {
     private func play(_ wavData: Data) {
         guard let player = try? AVAudioPlayer(data: wavData) else { return }
         player.delegate = self
+        player.volume = playbackVolume
         currentPlayer = player
         player.play()
     }

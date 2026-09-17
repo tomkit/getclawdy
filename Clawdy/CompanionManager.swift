@@ -176,27 +176,15 @@ final class CompanionManager: ObservableObject {
     /// Responses are billed to the user's own CLI subscription — no proxy, no keys.
     let coachEngineRegistry = CoachEngineRegistry()
 
-    /// Local, free text-to-speech (AVSpeechSynthesizer). The DEFAULT provider and
-    /// the automatic fallback whenever the optional ElevenLabs path is
-    /// unavailable or fails. Held as the protocol + injectable (default the real
-    /// `LocalSpeechTTSClient`) so a test can substitute a fake whose playback drains
-    /// instantly — the speak methods only use protocol members.
-    private let localTTSClient: SpeechTTSProviding
-
     /// Optional higher-quality TTS that calls the ElevenLabs API directly with
     /// the user's own key. Only used when the user selects it AND has saved a
-    /// key; otherwise we speak through `localTTSClient`.
+    /// key; otherwise we speak through `kokoroTTSClient`.
     private let elevenLabsTTSClient = ElevenLabsTTSClient()
 
-    /// The bundled Kokoro voice (on-device, free) — the DEFAULT provider. Loaded and warmed
-    /// in the background at launch; if the model can't load, `TTSProviderSelection` falls
-    /// back to `localTTSClient` (Apple) invisibly.
-    let kokoroTTSClient = KokoroTTSClient()
-
-    /// Whether the bundled voice can be used right now (model bundled and not failed to load).
-    private var isKokoroAvailable: Bool {
-        KokoroTTSClient.isModelBundled && !kokoroTTSClient.didFailToLoad
-    }
+    /// The bundled Kokoro voice (on-device, free) — the DEFAULT provider and the fallback
+    /// for ElevenLabs. Loaded and warmed in the background at launch. Injectable so tests
+    /// can pass one with playback muted (`playbackVolume = 0`); there is no other voice.
+    let kokoroTTSClient: KokoroTTSClient
 
     /// Cached active engine instance for the currently selected kind. Rebuilt
     /// lazily whenever the user switches engines.
@@ -549,7 +537,7 @@ final class CompanionManager: ObservableObject {
 
     init(
         loadElevenLabsAPIKeyFromKeychain: @escaping () -> String? = TTSKeychainStore.loadAPIKey,
-        localTTSClient injectedLocalTTSClient: SpeechTTSProviding? = nil,
+        kokoroTTSClient injectedKokoroTTSClient: KokoroTTSClient? = nil,
         dictationManager injectedDictationManager: BuddyDictationManager? = nil,
         skillStore: ClawdySkillStore = .shared
     ) {
@@ -562,9 +550,8 @@ final class CompanionManager: ObservableObject {
         self.skillStore = skillStore
         skillStore.installDefaultsIfMissing()
         self.loadElevenLabsAPIKeyFromKeychain = loadElevenLabsAPIKeyFromKeychain
-        // Default to the real on-device client (constructed here, on the main actor); tests
-        // inject a fake whose playback drains instantly so the speak-then-settle path is fast.
-        self.localTTSClient = injectedLocalTTSClient ?? LocalSpeechTTSClient()
+        // The real on-device voice; tests inject one with playback muted.
+        self.kokoroTTSClient = injectedKokoroTTSClient ?? KokoroTTSClient()
 
         // Restore the persisted engine choice when it's still installed; otherwise
         // default to the first detected engine. CoachEngineKind.allCases is ordered
@@ -738,17 +725,14 @@ final class CompanionManager: ObservableObject {
         switch resolvedTTSProviderKind {
         case .kokoro: return .kokoro(voiceID: kokoroVoiceID)
         case .elevenLabs: return .elevenLabs(voiceID: elevenLabsVoiceID)
-        case .apple: return .apple(voiceIdentifier: LocalSpeechTTSClient.preferredVoiceIdentifier)
         }
     }
 
-    /// The provider that will actually speak, given the selection, the ElevenLabs key, and
-    /// whether the bundled Kokoro model loaded.
+    /// The provider that will actually speak, given the selection and the ElevenLabs key.
     private var resolvedTTSProviderKind: TTSEngineKind {
         TTSProviderSelection.resolveProviderKind(
             selectedEngine: selectedTTSEngineKind,
-            hasUsableElevenLabsKey: hasElevenLabsAPIKey,
-            isKokoroAvailable: isKokoroAvailable
+            hasUsableElevenLabsKey: hasElevenLabsAPIKey
         )
     }
 
@@ -977,7 +961,6 @@ final class CompanionManager: ObservableObject {
         // Eliminate first-utterance/first-turn warmup latency: prime the local
         // speech synthesizer and spawn the warm coaching process now, so the
         // user's FIRST push-to-talk doesn't pay either cold start.
-        localTTSClient.prewarm()
         PronunciationOverridesFile.installTemplateIfMissing()
         kokoroTTSClient.voice = KokoroVoice.bundled.first { $0.id == kokoroVoiceID } ?? .defaultVoice
         kokoroTTSClient.playbackGate = { [weak self] in await self?.spokenCues.waitUntilNoCueIsPlaying() }
@@ -2000,8 +1983,7 @@ final class CompanionManager: ObservableObject {
                 let sentenceBuffer = SentenceStreamBuffer()
                 let responseSpeaker = StreamingResponseSpeaker(
                     provider: resolvedTTSProviderKind,
-                    appleTTSClient: localTTSClient,
-                    elevenLabsTTSClient: elevenLabsTTSClient,
+                            elevenLabsTTSClient: elevenLabsTTSClient,
                     kokoroTTSClient: kokoroTTSClient,
                     // On-demand: the speaker reads this ONLY if it resolves to and
                     // synthesizes through ElevenLabs. Under Apple TTS it's never
@@ -2278,8 +2260,7 @@ final class CompanionManager: ObservableObject {
     /// regardless of which provider spoke. Includes the streaming speaker so the
     /// brief gap between queued sentences doesn't read as "finished".
     private var isAnyTTSPlaying: Bool {
-        localTTSClient.isPlaying
-            || elevenLabsTTSClient.isPlaying
+        elevenLabsTTSClient.isPlaying
             || kokoroTTSClient.isPlaying
             || (currentResponseSpeaker?.isSpeaking ?? false)
     }
@@ -2306,7 +2287,7 @@ final class CompanionManager: ObservableObject {
     /// queue. Called when the user speaks again so a new utterance never overlaps
     /// the previous one.
     /// Deliberately does NOT touch the spoken cues: this runs at the START of every request
-    /// (right after the keys come up, when "okay" is playing and the fillers are scheduled)
+    /// (right after the keys come up, when "let me check" is playing and the fillers are scheduled)
     /// and before a spoken follow-up answer (when a queued "your page is ready" may be
     /// playing). Only a real stop — a re-press or the panel's Stop — cancels cues, and
     /// those call `spokenCues.cancelTurn()` themselves.
@@ -2314,7 +2295,6 @@ final class CompanionManager: ObservableObject {
         currentResponseSpeaker?.cancel()
         currentResponseSpeaker = nil
         currentSentenceBuffer = nil
-        localTTSClient.stopPlayback()
         elevenLabsTTSClient.stopPlayback()
         kokoroTTSClient.stopPlayback()
         // Tear down any audio-synced pointing schedule from the previous turn so a stale
@@ -2597,7 +2577,6 @@ final class CompanionManager: ObservableObject {
         stopAllTTS()
         let responseSpeaker = StreamingResponseSpeaker(
             provider: resolvedTTSProviderKind,
-            appleTTSClient: localTTSClient,
             elevenLabsTTSClient: elevenLabsTTSClient,
             kokoroTTSClient: kokoroTTSClient,
             elevenLabsAPIKeyProvider: loadElevenLabsAPIKeyFromKeychain,
@@ -2651,7 +2630,6 @@ final class CompanionManager: ObservableObject {
         stopAllTTS()
         let responseSpeaker = StreamingResponseSpeaker(
             provider: resolvedTTSProviderKind,
-            appleTTSClient: localTTSClient,
             elevenLabsTTSClient: elevenLabsTTSClient,
             kokoroTTSClient: kokoroTTSClient,
             // On-demand: read the secret ONLY if this resolves to ElevenLabs.

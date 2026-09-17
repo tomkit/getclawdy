@@ -12,8 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Research asks out loud.** When a research run needs a quick answer first, Clawdy now asks the question in its voice (at the next quiet moment) and the pill turns into the thing you're talking to — the question, a mic, and "⌃⌥ to answer". Hold the keys and answer; the run continues. The typed box is still there if you click the pill.
 - The research pill shows the brand claw and a quiet elapsed-time clock, so a minutes-long run never looks stuck.
 - **Speed settings.** Pick the model and effort for quick answers in the menu bar panel; the control is the same for both engines. Sonnet + low effort is now the default for Claude (about a second faster to the first spoken word than Opus at half the cost, and no multi-second silent think before a longer answer: low effort halved time-to-first-text on substantive questions in testing). For Codex, low effort is about 2× faster than medium.
-- **Instant feedback, all in Clawdy's voice.** About a second after you release the keys Clawdy says "okay" / "got it" (a natural beat, not the instant you stop), and if the answer is taking a while it says "let me check" / "still looking, bear with me" at sensible intervals — the register of a voice assistant, not a status line. Research runs now say "sure, I'll put a page together", "your page is ready", and "sorry, that one didn't work out" instead of playing system sounds. There are no sound effects, and no two voice outputs ever overlap: a research announcement waits until you and Clawdy are both quiet.
-- Clawdy now uses the best installed macOS voice (Premium or Enhanced, if you've downloaded one) instead of the compact default.
+- **Instant feedback, all in Clawdy's voice.** About a second after you release the keys Clawdy says "let me check" / "let me take a look" (a natural beat, not the instant you stop), and if the answer is taking a while it says "checking now" / "still looking, bear with me" at sensible intervals — the register of a voice assistant, not a status line. Research runs now say "sure, I'll put a page together", "your page is ready", and "sorry, that one didn't work out" instead of playing system sounds. There are no sound effects, and no two voice outputs ever overlap: a research announcement waits until you and Clawdy are both quiet.
 - **Fast mode switch.** Turns on the engine's own fast tier for quick answers: Claude Code fast mode (Opus only) or Codex `service_tier=fast` (about a second faster per reply). Off by default; both cost more.
 - Per-turn latency log (`log show --predicate 'subsystem == "com.clawdy.Clawdy" AND category == "latency"'`) so slow turns can be attributed to transcription, the model, or speech.
 
@@ -23,8 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Quieter recents list and History.** The claw's recents list is a compact "Recent" list sized to its rows; History rows show the skill and time on a second line with a status dot only for running/failed runs, and the detail header shows skill · engine · time.
 - **Simpler menu bar panel.** One right edge for every control, quieter hierarchy, the hotkey shown as keycaps, History and Quit on one row, no close button (click outside or press Escape). The "Use my Claude Code setup" toggle is gone: your setup always loads.
 
+### Removed
+- The macOS system voice. The built-in Kokoro voice replaces it entirely (ElevenLabs remains as the bring-your-own-key option).
+
 ### Fixed
-- The instant "okay" was being cut off (and the "let me look" fillers and a queued "your page is ready" were being cancelled) by the request's own teardown right after key release. Cues now survive the request start; only a re-press or Stop cancels them. A research hand-off says one thing, not "okay" and then "on it".
+- The instant "let me check" was being cut off (and the "let me look" fillers and a queued "your page is ready" were being cancelled) by the request's own teardown right after key release. Cues now survive the request start; only a re-press or Stop cancels them. A research hand-off says one thing, not "okay" and then "on it".
 - Opening or closing a research results page no longer forces a cold restart of the warm `claude` process on the next question.
 
 ## [0.0.3] - 2026-09-16

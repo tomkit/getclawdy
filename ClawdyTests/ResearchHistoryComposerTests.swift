@@ -319,31 +319,9 @@ struct FocusedFollowUpResolutionTests {
 
 // MARK: - Refused [FOLLOWUP] path drives real branch + settles voiceState (round-4 BLOCKING)
 
-/// A fake Apple TTS whose "playback" drains INSTANTLY (`speakText` returns immediately and
-/// `isPlaying` is always false) — modeling the TTS-suppressed/unavailable case deterministically
-/// so the speak-then-settle path completes without real audio or the 60s playback poll ceiling.
-@MainActor
-private final class InstantDrainTTSClient: SpeechTTSProviding {
-    private(set) var spokenTexts: [String] = []
-    func speakText(_ text: String) async throws { spokenTexts.append(text) }
-    var isPlaying: Bool { false }
-    func stopPlayback() {}
-}
-
-/// A fake TTS whose "playback" STAYS playing until explicitly released (`stopPlayback`),
-/// so a test can park a speak-then-settle call mid-playback and deterministically drive
-/// the older/newer speaker takeover that exercises the `currentResponseSpeaker` guard.
-@MainActor
-private final class ControllableTTSClient: SpeechTTSProviding {
-    private(set) var spokenTexts: [String] = []
-    private var isCurrentlyPlaying = false
-    func speakText(_ text: String) async throws {
-        spokenTexts.append(text)
-        isCurrentlyPlaying = true
-    }
-    var isPlaying: Bool { isCurrentlyPlaying }
-    func stopPlayback() { isCurrentlyPlaying = false }
-}
+/// Every speak path below runs the REAL built-in voice with playback muted (see
+/// `makeMutedKokoroTTSClient`) — the settle logic is exercised against actual synthesis
+/// and playback timing, not a fake that drains instantly.
 
 @MainActor
 struct RefusedFocusedFollowUpBranchTests {
@@ -354,84 +332,84 @@ struct RefusedFocusedFollowUpBranchTests {
     /// the fallback completes. The fake drains instantly, covering the TTS-suppressed case
     /// deterministically (no real audio, no wedge).
     @Test func refusedFollowUpRecordsHonestLineSpeaksFallbackAndSettlesVoiceStateToIdle() async {
-        let fakeTTS = InstantDrainTTSClient()
-        let manager = CompanionManager(loadElevenLabsAPIKeyFromKeychain: { nil }, localTTSClient: fakeTTS)
+        let fakeTTS = makeMutedKokoroTTSClient()
+        let manager = CompanionManager(loadElevenLabsAPIKeyFromKeychain: { nil }, kokoroTTSClient: fakeTTS)
         // Anchor the lazily-created research manager's overlay off-screen before the follow-up
         // handler below reaches it (via stopAllTTS → researchSessionManager.focusedSessionID).
         manager.researchTestAnchorOriginOffset = offscreenResearchAnchorOffset
-        // Pin to Apple so the fallback speaks through the injected fake (not a real ElevenLabs
-        // network call the machine's saved preference might otherwise select).
-        manager.setSelectedTTSEngineForTesting(.apple)
+        // Pin to the built-in voice (not a real ElevenLabs network call the machine's saved
+        // preference might otherwise select).
+        manager.setSelectedTTSEngineForTesting(.kokoro)
 
         await manager.handleFocusedFollowUpResult(routed: false, transcript: "make the background darker")
 
         let recordedLine = manager.lastConversationAssistantLineForTesting
         #expect(recordedLine != "(continued the focused research page)") // no false success
         #expect(recordedLine?.contains("couldn't continue") == true)     // honest line
-        #expect(!fakeTTS.spokenTexts.isEmpty)                            // spoken, not swallowed
+        #expect(!fakeTTS.spokenTextsForTesting.isEmpty)                            // spoken, not swallowed
         #expect(manager.voiceState == .idle)                            // never wedged on Responding
     }
 
     /// The SUCCESS path is unchanged: it records the quiet "continued" line, stays silent (no
     /// fallback spoken), and settles to idle synchronously.
     @Test func continuedFollowUpRecordsQuietLineStaysSilentAndSettlesIdle() async {
-        let fakeTTS = InstantDrainTTSClient()
-        let manager = CompanionManager(loadElevenLabsAPIKeyFromKeychain: { nil }, localTTSClient: fakeTTS)
+        let fakeTTS = makeMutedKokoroTTSClient()
+        let manager = CompanionManager(loadElevenLabsAPIKeyFromKeychain: { nil }, kokoroTTSClient: fakeTTS)
         // Anchor the lazily-created research manager's overlay off-screen before the follow-up
         // handler below can reach it, so no badge flashes on-screen under test.
         manager.researchTestAnchorOriginOffset = offscreenResearchAnchorOffset
-        manager.setSelectedTTSEngineForTesting(.apple)
+        manager.setSelectedTTSEngineForTesting(.kokoro)
 
         await manager.handleFocusedFollowUpResult(routed: true, transcript: "make the background darker")
 
         #expect(manager.lastConversationAssistantLineForTesting == "(continued the focused research page)")
-        #expect(fakeTTS.spokenTexts.isEmpty) // success path speaks nothing here
+        #expect(fakeTTS.spokenTextsForTesting.isEmpty) // success path speaks nothing here
         #expect(manager.voiceState == .idle)
     }
 
     /// A spoken research follow-up ANSWER (a question's answer or an iterate confirmation, routed
     /// through `speakResearchFollowUpAnswer`) must SETTLE `voiceState` back to `.idle` after
-    /// playback finishes — not just hide the overlay. The fake drains instantly (covering the
-    /// TTS-suppressed case) yet still fires onPlaybackStarted (flipping to `.responding`), so this
+    /// playback finishes — not just hide the overlay. The real (muted) voice fires
+    /// onPlaybackStarted (flipping to `.responding`) and finishes a moment later, so this
     /// proves the wedge is cleared: before the fix the answer path left `voiceState` on
     /// `.responding` forever; after it, the panel returns to `.idle`.
     @Test func spokenFollowUpAnswerSettlesVoiceStateToIdleAfterPlayback() async {
-        let fakeTTS = InstantDrainTTSClient()
-        let manager = CompanionManager(loadElevenLabsAPIKeyFromKeychain: { nil }, localTTSClient: fakeTTS)
+        let fakeTTS = makeMutedKokoroTTSClient()
+        let manager = CompanionManager(loadElevenLabsAPIKeyFromKeychain: { nil }, kokoroTTSClient: fakeTTS)
         // Keep the lazily-created research overlay off-screen (stopAllTTS reaches it) under test.
         manager.researchTestAnchorOriginOffset = offscreenResearchAnchorOffset
-        manager.setSelectedTTSEngineForTesting(.apple)
+        manager.setSelectedTTSEngineForTesting(.kokoro)
 
         await manager.speakResearchFollowUpAnswerAndSettleForTesting("Here's the answer to your question.")
 
-        #expect(fakeTTS.spokenTexts == ["Here's the answer to your question."]) // spoken, not swallowed
+        #expect(fakeTTS.spokenTextsForTesting == ["Here's the answer to your question."]) // spoken, not swallowed
         #expect(manager.voiceState == .idle)                                    // never wedged on Responding
     }
 
     /// The `currentResponseSpeaker === responseSpeaker` guard: when a NEWER spoken
     /// follow-up takes over while an OLDER settle is still awaiting playback, the stale
     /// settle must NOT clobber the newer turn's `voiceState` back to `.idle`. The
-    /// controllable fake parks the older call mid-playback; the newer call's
+    /// long clip keeps the older call mid-playback; the newer call's
     /// `stopAllTTS()` supersedes it (becoming the current speaker and staying
     /// `.responding`); once released, ONLY the newer (current) speaker settles to idle.
     @Test func staleFollowUpSettleDoesNotClobberNewerTurnVoiceState() async {
-        let controllableTTS = ControllableTTSClient()
-        let manager = CompanionManager(loadElevenLabsAPIKeyFromKeychain: { nil }, localTTSClient: controllableTTS)
+        let controllableTTS = makeMutedKokoroTTSClient()
+        let manager = CompanionManager(loadElevenLabsAPIKeyFromKeychain: { nil }, kokoroTTSClient: controllableTTS)
         manager.researchTestAnchorOriginOffset = offscreenResearchAnchorOffset
-        manager.setSelectedTTSEngineForTesting(.apple)
+        manager.setSelectedTTSEngineForTesting(.kokoro)
 
         // Older turn: starts speaking and stays "playing", so its settle parks awaiting
         // playback (voiceState flips to .responding).
-        let olderTurn = Task { await manager.speakResearchFollowUpAnswerAndSettleForTesting("old answer") }
+        let olderTurn = Task { await manager.speakResearchFollowUpAnswerAndSettleForTesting("old answer: the older turn keeps talking for a good few seconds so the takeover happens mid-playback.") }
         await pollUntilTrue("older turn to reach .responding mid-playback") {
-            manager.voiceState == .responding && controllableTTS.spokenTexts.contains("old answer")
+            manager.voiceState == .responding && controllableTTS.spokenTextsForTesting.contains { $0.hasPrefix("old answer") }
         }
 
         // Newer turn takes over: its stopAllTTS() cancels the older speaker (freeing the
         // older settle's await) and makes THIS the current speaker, staying .responding.
-        let newerTurn = Task { await manager.speakResearchFollowUpAnswerAndSettleForTesting("new answer") }
+        let newerTurn = Task { await manager.speakResearchFollowUpAnswerAndSettleForTesting("new answer: the newer turn also keeps talking for a good few seconds so the stale settle has time to run.") }
         await pollUntilTrue("newer turn to take over and start playing") {
-            controllableTTS.spokenTexts.contains("new answer")
+            controllableTTS.spokenTextsForTesting.contains { $0.hasPrefix("new answer") }
         }
 
         // Give the older, now-unblocked stale settle time to run. With the identity

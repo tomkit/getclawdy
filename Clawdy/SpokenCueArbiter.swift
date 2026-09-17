@@ -3,7 +3,7 @@
 //  Clawdy
 //
 //  The ONE owner of every DETERMINISTIC spoken cue — the push-to-talk acknowledgements
-//  ("okay", "still checking") and the research announcements ("on it", "your page is
+//  ("let me check", "still checking") and the research announcements ("on it", "your page is
 //  ready") — and the gate the REPLY audio passes through, so no two voice outputs ever
 //  overlap, whether they came from a pre-rendered file or from a live API call:
 //
@@ -26,14 +26,14 @@ final class SpokenCueArbiter {
     private let renderer: AcknowledgementCueRenderer
     /// The filler steps (3 s / 8 s / 15 s), cancelled when the turn ends any way.
     private var scheduledTasks: [Task<Void, Never>] = []
-    /// The acknowledgement step (the 1 s "okay"), kept when a turn ends WITHOUT a spoken
+    /// The acknowledgement step (the 1 s "let me check"), kept when a turn ends WITHOUT a spoken
     /// reply (a research hand-off, a voice answer to a question) — the user still gets
     /// their nod — and cancelled only by a hard stop or a replacing announcement.
     private var acknowledgementTask: Task<Void, Never>?
     private var cuePlayer: AVAudioPlayer?
     private var replyHasBegun = false
     private var turnHasEnded = true
-    /// Whether this turn's acknowledgement ("okay") has already been spoken, so a research
+    /// Whether this turn's acknowledgement ("let me check") has already been spoken, so a research
     /// hand-off doesn't add a second one ("on it…") right behind it.
     private var hasSpokenAcknowledgementThisTurn = false
     /// True while the reply is speaking or the user is recording: announcements queue.
@@ -139,7 +139,7 @@ final class SpokenCueArbiter {
     // MARK: - Announcements (research start / done / error)
 
     /// A research run is starting from this turn: ONE acknowledgement, not two. If the
-    /// turn's "okay" already played, the "on it…" line is skipped; if it hadn't fired yet
+    /// turn's "let me check" already played, the "on it…" line is skipped; if it hadn't fired yet
     /// (the router was quick), it's cancelled and the research line IS the acknowledgement.
     func announceResearchStart(_ phrase: String) {
         let alreadyAcknowledged = hasSpokenAcknowledgementThisTurn

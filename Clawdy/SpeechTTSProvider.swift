@@ -5,8 +5,9 @@
 //  Common abstraction over the text-to-speech backends Clawdy can speak
 //  through. The bundled Kokoro voice (`KokoroTTSClient`, on-device, free) is the
 //  default; the optional ElevenLabs client (`ElevenLabsTTSClient`) calls the
-//  ElevenLabs API directly with the user's own key; the Apple synthesizer
-//  (`LocalSpeechTTSClient`) is the invisible last resort when Kokoro can't load.
+//  ElevenLabs API directly with the user's own key. There is no other voice: an
+//  ElevenLabs failure falls back to Kokoro; a Kokoro failure is logged and the turn
+//  is silent (the text still lands in the panel).
 //
 //  Everything in this file that decides WHICH provider to use and WHEN to fall
 //  back is a pure, side-effect-free function so it can be unit-tested headlessly
@@ -44,7 +45,7 @@ struct SpeechClipAlignment: Equatable {
 /// the fixed per-point dwell).
 struct SpokenClipTiming {
     /// Character-level alignment for this clip, or nil when the provider produced none
-    /// (Apple TTS, an empty/failed ElevenLabs alignment).
+    /// (Kokoro, an empty/failed ElevenLabs alignment).
     let alignment: SpeechClipAlignment?
     /// Reads seconds elapsed since THIS clip's audio started playing (from the specific
     /// `AVAudioPlayer.currentTime` — TRAP 2), or nil once the clip is no longer the
@@ -52,12 +53,12 @@ struct SpokenClipTiming {
     /// return tells the scheduler to stop waiting and advance immediately for that point.
     let playheadSecondsReader: (@MainActor () -> TimeInterval?)?
 
-    /// The "no timing available" value used by Apple and by the default protocol
+    /// The "no timing available" value used by Kokoro and by the default protocol
     /// implementation, so callers gracefully degrade.
     static let none = SpokenClipTiming(alignment: nil, playheadSecondsReader: nil)
 }
 
-/// Anything that can speak a string aloud. Both `LocalSpeechTTSClient` and
+/// Anything that can speak a string aloud. Both `KokoroTTSClient` and
 /// `ElevenLabsTTSClient` conform, so `CompanionManager` can speak through
 /// whichever provider the user selected. The surface deliberately matches the
 /// original ElevenLabs client (speakText / isPlaying / stopPlayback) so the
@@ -71,7 +72,7 @@ protocol SpeechTTSProviding: AnyObject {
     func speakText(_ text: String) async throws
     /// Speaks `text` and reports any character-level timing the provider produced,
     /// plus a reader for the clip's own playhead, so the caller can sync the shadow
-    /// cursor to the spoken words. Providers WITHOUT timing (Apple) fall back to the
+    /// cursor to the spoken words. Providers WITHOUT timing (Kokoro) fall back to the
     /// default implementation below, which speaks via `speakText` and returns
     /// `SpokenClipTiming.none` — so callers degrade gracefully to untimed pointing.
     /// Only `ElevenLabsTTSClient` overrides this to return real alignment.
@@ -80,15 +81,14 @@ protocol SpeechTTSProviding: AnyObject {
     var isPlaying: Bool { get }
     /// Stops any in-progress playback immediately.
     func stopPlayback()
-    /// Optional warm-up (e.g. priming the on-device synthesizer so the first utterance has no
-    /// cold-start delay). No-op by default so callers can hold the client as the protocol type;
-    /// the local Apple client overrides it.
+    /// Optional warm-up (loading the on-device model so the first utterance has no cold-start
+    /// delay). No-op by default so callers can hold the client as the protocol type.
     func prewarm()
 }
 
 extension SpeechTTSProviding {
-    /// Default: speak with no timing. Apple (and any fake in tests) uses this, so an
-    /// Apple-TTS turn always degrades to the untimed, fixed-dwell pointing sequence.
+    /// Default: speak with no timing. Kokoro (and any fake in tests) uses this, so a
+    /// Kokoro turn always degrades to the untimed, fixed-dwell pointing sequence.
     func speakTextReportingTiming(_ text: String) async throws -> SpokenClipTiming {
         try await speakText(text)
         return .none
@@ -100,22 +100,15 @@ extension SpeechTTSProviding {
 enum TTSEngineKind: String, CaseIterable, Identifiable {
     /// The bundled Kokoro-82M voice, on-device via ONNX Runtime. Free, no key. The default.
     case kokoro
-    /// On-device `AVSpeechSynthesizer`. Not offered in the picker any more — it is only the
-    /// fallback when the Kokoro model can't load (the case stays so old persisted values decode).
-    case apple
     /// ElevenLabs cloud TTS, called directly with the user's own API key.
     case elevenLabs
 
     var id: String { rawValue }
 
-    /// The engines the settings picker offers (Apple is a silent fallback, never a choice).
-    static let userSelectableCases: [TTSEngineKind] = [.kokoro, .elevenLabs]
-
     /// Short label for the settings picker.
     var displayName: String {
         switch self {
         case .kokoro: return "Built-in"
-        case .apple: return "Apple"
         case .elevenLabs: return "ElevenLabs"
         }
     }
@@ -125,15 +118,15 @@ enum TTSEngineKind: String, CaseIterable, Identifiable {
     var settingsSubtitle: String {
         switch self {
         case .kokoro: return "Free, on-device"
-        case .apple: return "System voice"
         case .elevenLabs: return "Your API key"
         }
     }
 
-    /// A previously persisted "apple" choice (the old default) becomes the new default.
+    /// A persisted choice, or the default. The retired "apple" value (the pre-Kokoro
+    /// system voice) decodes to the default.
     static func fromPersisted(_ rawValue: String?) -> TTSEngineKind {
         guard let rawValue, let kind = TTSEngineKind(rawValue: rawValue) else { return .kokoro }
-        return kind == .apple ? .kokoro : kind
+        return kind
     }
 }
 
@@ -143,23 +136,18 @@ enum TTSProviderSelection {
     /// Decides which provider should actually speak an utterance, given the
     /// user's selected engine and whether a usable ElevenLabs key is present.
     ///
-    /// Kokoro is usable when its model loaded; Apple is always usable. ElevenLabs is
-    /// only usable when the user both selected it AND has a non-empty key configured.
-    /// Anything unusable silently resolves to the next best (Kokoro, then Apple) so
-    /// the voice flow never goes silent.
+    /// Kokoro is always usable. ElevenLabs is only usable when the user both selected
+    /// it AND has a non-empty key configured; otherwise we silently resolve to Kokoro
+    /// so the voice flow never goes silent.
     static func resolveProviderKind(
         selectedEngine: TTSEngineKind,
-        hasUsableElevenLabsKey: Bool,
-        isKokoroAvailable: Bool = true
+        hasUsableElevenLabsKey: Bool
     ) -> TTSEngineKind {
-        let localDefault: TTSEngineKind = isKokoroAvailable ? .kokoro : .apple
         switch selectedEngine {
         case .kokoro:
-            return localDefault
-        case .apple:
-            return .apple
+            return .kokoro
         case .elevenLabs:
-            return hasUsableElevenLabsKey ? .elevenLabs : localDefault
+            return hasUsableElevenLabsKey ? .elevenLabs : .kokoro
         }
     }
 
@@ -171,7 +159,7 @@ enum TTSProviderSelection {
     }
 
     /// Whether an error thrown while speaking through ElevenLabs should trigger
-    /// a silent fallback to Apple TTS for that utterance.
+    /// a silent fallback to the built-in Kokoro voice for that utterance.
     ///
     /// Every ElevenLabs failure mode — missing/invalid key, network failure,
     /// rate-limit, timeout, bad HTTP status, empty/undecodable audio — falls
@@ -183,7 +171,7 @@ enum TTSProviderSelection {
     /// `Task.checkCancellation()`, but ALSO as `URLError(.cancelled)` because
     /// `URLSession`'s async `data(for:)` surfaces a cancelled Task as a URL
     /// error rather than a `CancellationError`. Both must suppress fallback.
-    static func shouldFallBackToApple(for error: Error) -> Bool {
+    static func shouldFallBackToLocalVoice(for error: Error) -> Bool {
         if error is CancellationError { return false }
         if let urlError = error as? URLError, urlError.code == .cancelled { return false }
         return true

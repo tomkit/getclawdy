@@ -999,13 +999,13 @@ struct CompanionPanelView: View {
     /// Lets the user choose the text-to-speech engine. The bundled Kokoro voice is
     /// the free, on-device default (with a small voice menu); ElevenLabs uses the
     /// user's own API key. When ElevenLabs is selected, exposes the key entry and
-    /// voice picker. (Apple's synthesizer is only an invisible fallback, never a choice.)
+    /// voice picker.
     private var ttsSettingsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             // The "Voice" section header names this control, so the provider segment sits
             // on its own line rather than repeating the label.
             HStack(spacing: 0) {
-                ForEach(TTSEngineKind.userSelectableCases) { ttsEngineKind in
+                ForEach(TTSEngineKind.allCases) { ttsEngineKind in
                     ttsEngineOptionButton(ttsEngineKind: ttsEngineKind)
                 }
             }

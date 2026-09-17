@@ -10,17 +10,13 @@
 //  Provider behavior (the streaming choice differs per provider on purpose):
 //   - Kokoro (the bundled default): every sentence is handed to the synthesizer the
 //     moment it completes (`prepareClip`), so sentence N+1 is synthesized while
-//     sentence N plays; clips play strictly in order. A synthesis failure falls
-//     back to Apple for that clip.
-//   - Apple (AVSpeechSynthesizer): every sentence is spoken as soon as it
-//     completes. Local synthesis is free and instant, so per-sentence playback
-//     costs nothing and gives the snappiest, most natural cadence.
+//     sentence N plays; clips play strictly in order.
 //   - ElevenLabs (network, per-request cost): the FIRST sentence is spoken
 //     immediately for fast first-audio, then ALL remaining sentences are batched
 //     into a SINGLE request sent when the response finishes. This caps the number
 //     of network round-trips (and the per-request cost) at two while still
 //     cutting the silent gap. If the first-sentence request fails in a
-//     fallback-worthy way, every later chunk falls back to Apple.
+//     fallback-worthy way, every later chunk falls back to Kokoro.
 //
 //  Ordering is enforced by chaining each utterance's Task onto the previous one
 //  and waiting for playback to actually finish before starting the next, so
@@ -37,7 +33,7 @@ import Foundation
 /// sentence, clip 1 is the batched remainder — and each clip's alignment times are
 /// relative to that clip's OWN zero, not a global timeline. The `clipOrdinal` + `clipText`
 /// let the manager map each POINT to the word within the SAME clip's substring, and the
-/// `timing.playheadSecondsReader` is that clip's own playhead. Apple clips are never
+/// `timing.playheadSecondsReader` is that clip's own playhead. Kokoro clips are never
 /// reported (they carry no alignment); only the timed ElevenLabs path reports.
 struct SpokenClipReport {
     /// 0-based order the clip was spoken in: 0 = first sentence (or the whole reply when
@@ -53,17 +49,13 @@ struct SpokenClipReport {
 @MainActor
 final class StreamingResponseSpeaker {
     private let provider: TTSEngineKind
-    /// The Apple TTS client, held as the protocol so a fake can be injected in tests (the
-    /// speaker only ever calls `speakText`/`isPlaying`/`stopPlayback` on it). Production passes
-    /// the concrete `LocalSpeechTTSClient`.
-    private let appleTTSClient: SpeechTTSProviding
     private let elevenLabsTTSClient: ElevenLabsTTSClient
-    /// The bundled Kokoro voice; nil in tests that only exercise the Apple/ElevenLabs paths.
-    private let kokoroTTSClient: KokoroTTSClient?
+    /// The bundled Kokoro voice — the default provider AND the fallback for ElevenLabs.
+    private let kokoroTTSClient: KokoroTTSClient
     /// Reads the ElevenLabs API secret ON-DEMAND. Invoked ONLY inside
     /// `speakOneUtterance` when this speaker is actually about to synthesize
-    /// through ElevenLabs — never eagerly at construction. Under Apple TTS it is
-    /// never called, so an Apple-TTS user's speak path never touches the Keychain
+    /// through ElevenLabs — never eagerly at construction. Under Kokoro it is
+    /// never called, so a Kokoro user's speak path never touches the Keychain
     /// (and never triggers the macOS Keychain-access prompt).
     private let elevenLabsAPIKeyProvider: () -> String?
     private let elevenLabsVoiceID: String
@@ -78,7 +70,7 @@ final class StreamingResponseSpeaker {
 
     /// Called each time an ElevenLabs clip's audio STARTS, carrying that clip's timing so
     /// the manager can schedule audio-synced cursor advances against it. nil (default) for
-    /// the non-pointing speak paths and for Apple TTS (which produces no alignment).
+    /// the non-pointing speak paths and for Kokoro (which produces no alignment).
     private let onClipSpoken: (@MainActor (SpokenClipReport) -> Void)?
 
     /// How many ElevenLabs clips have been spoken so far, so each report carries the right
@@ -96,20 +88,18 @@ final class StreamingResponseSpeaker {
     // ElevenLabs batching state.
     private var elevenLabsFirstSentenceStarted = false
     private var elevenLabsBatchedRemainder = ""
-    private var didFallBackToApple = false
+    private var didFallBackToLocalVoice = false
 
     init(
         provider: TTSEngineKind,
-        appleTTSClient: SpeechTTSProviding,
         elevenLabsTTSClient: ElevenLabsTTSClient,
-        kokoroTTSClient: KokoroTTSClient? = nil,
+        kokoroTTSClient: KokoroTTSClient,
         elevenLabsAPIKeyProvider: @escaping () -> String?,
         elevenLabsVoiceID: String,
         onPlaybackStarted: @escaping @MainActor () -> Void,
         onClipSpoken: (@MainActor (SpokenClipReport) -> Void)? = nil
     ) {
         self.provider = provider
-        self.appleTTSClient = appleTTSClient
         self.elevenLabsTTSClient = elevenLabsTTSClient
         self.kokoroTTSClient = kokoroTTSClient
         self.elevenLabsAPIKeyProvider = elevenLabsAPIKeyProvider
@@ -122,8 +112,7 @@ final class StreamingResponseSpeaker {
     /// Includes the brief between-sentence gap so the overlay isn't faded early.
     var isSpeaking: Bool {
         if isCancelled { return false }
-        return queuedUtteranceCount > 0 || appleTTSClient.isPlaying || elevenLabsTTSClient.isPlaying
-            || (kokoroTTSClient?.isPlaying ?? false)
+        return queuedUtteranceCount > 0 || elevenLabsTTSClient.isPlaying || kokoroTTSClient.isPlaying
     }
 
     /// Enqueues one freshly-completed sentence (point tag already stripped).
@@ -133,7 +122,7 @@ final class StreamingResponseSpeaker {
         guard !trimmed.isEmpty else { return }
 
         switch provider {
-        case .kokoro, .apple:
+        case .kokoro:
             appendUtterance(trimmed, preferElevenLabs: false)
         case .elevenLabs:
             if !elevenLabsFirstSentenceStarted {
@@ -156,7 +145,7 @@ final class StreamingResponseSpeaker {
         let trimmedFull = fullSpokenText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         switch provider {
-        case .kokoro, .apple:
+        case .kokoro:
             if !trimmedRemainder.isEmpty {
                 appendUtterance(trimmedRemainder, preferElevenLabs: false)
             }
@@ -188,9 +177,8 @@ final class StreamingResponseSpeaker {
     func cancel() {
         isCancelled = true
         pendingSpeechChain.cancel()
-        appleTTSClient.stopPlayback()
         elevenLabsTTSClient.stopPlayback()
-        kokoroTTSClient?.stopPlayback()
+        kokoroTTSClient.stopPlayback()
         queuedUtteranceCount = 0
     }
 
@@ -201,7 +189,7 @@ final class StreamingResponseSpeaker {
         // Kokoro: start synthesizing NOW, so the model works on this sentence while the
         // earlier ones are still playing (the clip is only played in its turn below).
         let preparedKokoroClip: KokoroTTSClient.PreparedClip? = {
-            guard provider == .kokoro, !preferElevenLabs, let kokoroTTSClient else { return nil }
+            guard provider == .kokoro, !preferElevenLabs else { return nil }
             return kokoroTTSClient.prepareClip(text)
         }()
         let previousChain = pendingSpeechChain
@@ -209,34 +197,34 @@ final class StreamingResponseSpeaker {
             await previousChain.value
             guard let self else { return }
             if !self.isCancelled && !Task.isCancelled {
-                await self.speakOneUtterance(text, preferElevenLabs: preferElevenLabs && !self.didFallBackToApple, preparedKokoroClip: preparedKokoroClip)
+                await self.speakOneUtterance(text, preferElevenLabs: preferElevenLabs && !self.didFallBackToLocalVoice, preparedKokoroClip: preparedKokoroClip)
             }
             self.queuedUtteranceCount = max(0, self.queuedUtteranceCount - 1)
         }
     }
 
     private func speakOneUtterance(_ text: String, preferElevenLabs: Bool, preparedKokoroClip: KokoroTTSClient.PreparedClip? = nil) async {
-        if let preparedKokoroClip, let kokoroTTSClient {
+        if let preparedKokoroClip {
             // The client runs the cue gate itself, AFTER synthesis, so the model's work
             // overlaps the acknowledgement instead of waiting behind it.
             do {
                 latencyLog?.ttsRequested(provider: "kokoro")
                 try await kokoroTTSClient.speak(preparedClip: preparedKokoroClip)
                 markPlaybackStartedIfNeeded()
-                await waitForPlaybackToFinish(isPlaying: { [weak self] in self?.kokoroTTSClient?.isPlaying ?? false })
+                await waitForPlaybackToFinish(isPlaying: { [weak self] in self?.kokoroTTSClient.isPlaying ?? false })
                 return
             } catch {
-                guard TTSProviderSelection.shouldFallBackToApple(for: error) else { return }
-                print("⚠️ Kokoro TTS failed, falling back to Apple for this clip: \(error)")
-                // Fall through and speak this same chunk via Apple.
+                guard TTSProviderSelection.shouldFallBackToLocalVoice(for: error) else { return }
+                print("⚠️ Kokoro TTS failed for this clip: \(error)")
+                // Fall through to one plain retry of the same clip below.
             }
         }
         await cueArbiter?.waitUntilNoCueIsPlaying()
         // Reserve this clip's ordinal UP FRONT when it is an ElevenLabs-intended clip, so the
         // report carries the right ordinal (0 = first sentence, 1 = batched remainder) whether
-        // we get real timing OR fall back to Apple. BLOCKER 3: the manager's audio-sync
+        // we get real timing OR fall back to Kokoro. BLOCKER 3: the manager's audio-sync
         // scheduler waits for the report of the clip a POINT lands in — if an ElevenLabs clip
-        // falls back to Apple and emits NO report, that wait would hang ~12s and strand the
+        // falls back to Kokoro and emits NO report, that wait would hang ~12s and strand the
         // cursor. Emitting a report on EVERY path (timing on success, nil alignment on
         // fallback) lets the scheduler degrade PROMPTLY to the untimed walk for that clip.
         let elevenLabsClipOrdinal: Int?
@@ -268,38 +256,33 @@ final class StreamingResponseSpeaker {
             } catch {
                 // Cancellation must NOT fall back (the user spoke again). No report is
                 // emitted: the turn (and its scheduler) is being torn down anyway.
-                guard TTSProviderSelection.shouldFallBackToApple(for: error) else { return }
-                didFallBackToApple = true
-                print("⚠️ ElevenLabs streaming TTS failed, falling back to Apple: \(error)")
-                // Fall through and speak this same chunk via Apple.
+                guard TTSProviderSelection.shouldFallBackToLocalVoice(for: error) else { return }
+                didFallBackToLocalVoice = true
+                print("⚠️ ElevenLabs streaming TTS failed, falling back to the built-in voice: \(error)")
+                // Fall through and speak this same chunk via Kokoro.
             }
         }
 
-        // The local fallback: the bundled Kokoro voice when it loaded, else Apple. A provider
-        // resolved to `.apple` (Kokoro unavailable, or a test pinning the injected Apple fake)
-        // must speak through Apple itself.
-        let useKokoroAsFallback = provider != .apple && preparedKokoroClip == nil
-            && kokoroTTSClient != nil && kokoroTTSClient?.didFailToLoad == false
-        let fallbackClient: SpeechTTSProviding = useKokoroAsFallback ? kokoroTTSClient! : appleTTSClient
+        // The built-in voice speaks the clip (an ElevenLabs fallback, or a plain retry).
         do {
-            latencyLog?.ttsRequested(provider: useKokoroAsFallback ? "kokoro" : "apple")
-            try await fallbackClient.speakText(text)
+            latencyLog?.ttsRequested(provider: "kokoro")
+            try await kokoroTTSClient.speakText(text)
             markPlaybackStartedIfNeeded()
-            // BLOCKER 3: if this was an ElevenLabs-intended clip that fell back to Apple,
+            // BLOCKER 3: if this was an ElevenLabs-intended clip that fell back to Kokoro,
             // STILL report it — with NO alignment — so the scheduler waiting on this clip
             // degrades to the untimed walk at once instead of blocking on a report that
             // would otherwise never arrive.
             if let elevenLabsClipOrdinal {
                 onClipSpoken?(SpokenClipReport(clipOrdinal: elevenLabsClipOrdinal, clipText: text, timing: .none))
             }
-            await waitForPlaybackToFinish(isPlaying: { fallbackClient.isPlaying })
+            await waitForPlaybackToFinish(isPlaying: { [weak self] in self?.kokoroTTSClient.isPlaying ?? false })
         } catch {
             // Even if the local fallback ALSO failed, emit the nil-alignment report so a scheduler
             // waiting on this clip is released rather than left hanging.
             if let elevenLabsClipOrdinal {
                 onClipSpoken?(SpokenClipReport(clipOrdinal: elevenLabsClipOrdinal, clipText: text, timing: .none))
             }
-            print("⚠️ Apple streaming TTS error: \(error)")
+            print("⚠️ Built-in voice error: \(error)")
         }
     }
 

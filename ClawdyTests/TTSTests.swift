@@ -16,37 +16,25 @@ struct TTSTests {
 
     // MARK: - Provider selection
 
-    @Test func appleSelectionAlwaysResolvesToApple() {
-        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .apple, hasUsableElevenLabsKey: false) == .apple)
-        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .apple, hasUsableElevenLabsKey: true) == .apple)
+    @Test func kokoroIsTheDefaultAndAlwaysResolvesToItself() {
+        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .kokoro, hasUsableElevenLabsKey: false) == .kokoro)
+        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .kokoro, hasUsableElevenLabsKey: true) == .kokoro)
     }
 
     @Test func elevenLabsSelectionResolvesToElevenLabsOnlyWithUsableKey() {
         #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .elevenLabs, hasUsableElevenLabsKey: true) == .elevenLabs)
     }
 
-    @Test func elevenLabsSelectionFallsBackToAppleWithoutKey() {
-        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .elevenLabs, hasUsableElevenLabsKey: false, isKokoroAvailable: false) == .apple)
+    @Test func elevenLabsWithoutKeyFallsBackToKokoro() {
+        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .elevenLabs, hasUsableElevenLabsKey: false) == .kokoro)
     }
 
-    // MARK: - Kokoro (the bundled default)
-
-    @Test func kokoroIsTheDefaultAndAppleOnlyWhenItCannotLoad() {
-        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .kokoro, hasUsableElevenLabsKey: false) == .kokoro)
-        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .kokoro, hasUsableElevenLabsKey: true) == .kokoro)
-        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .kokoro, hasUsableElevenLabsKey: false, isKokoroAvailable: false) == .apple)
-    }
-
-    @Test func elevenLabsWithoutKeyFallsBackToKokoroBeforeApple() {
-        #expect(TTSProviderSelection.resolveProviderKind(selectedEngine: .elevenLabs, hasUsableElevenLabsKey: false, isKokoroAvailable: true) == .kokoro)
-    }
-
-    @Test func persistedAppleChoiceMigratesToKokoroAndApplesIsNotOffered() {
+    @Test func persistedChoicesDecodeAndTheRetiredAppleValueBecomesTheDefault() {
         #expect(TTSEngineKind.fromPersisted(nil) == .kokoro)
         #expect(TTSEngineKind.fromPersisted("apple") == .kokoro)
         #expect(TTSEngineKind.fromPersisted("elevenLabs") == .elevenLabs)
         #expect(TTSEngineKind.fromPersisted("kokoro") == .kokoro)
-        #expect(TTSEngineKind.userSelectableCases == [.kokoro, .elevenLabs])
+        #expect(TTSEngineKind.allCases == [.kokoro, .elevenLabs])
     }
 
     @Test func pronunciationOverridesFileParsesWordColonPhonemes() {
@@ -77,30 +65,30 @@ struct TTSTests {
     // MARK: - Fallback decision
 
     @Test func everyElevenLabsErrorFallsBackToApple() {
-        #expect(TTSProviderSelection.shouldFallBackToApple(for: ElevenLabsTTSError.missingAPIKey) == true)
-        #expect(TTSProviderSelection.shouldFallBackToApple(for: ElevenLabsTTSError.httpStatus(401)) == true)
-        #expect(TTSProviderSelection.shouldFallBackToApple(for: ElevenLabsTTSError.httpStatus(429)) == true)
-        #expect(TTSProviderSelection.shouldFallBackToApple(for: ElevenLabsTTSError.emptyAudio) == true)
-        #expect(TTSProviderSelection.shouldFallBackToApple(for: ElevenLabsTTSError.audioDecodeFailed) == true)
+        #expect(TTSProviderSelection.shouldFallBackToLocalVoice(for: ElevenLabsTTSError.missingAPIKey) == true)
+        #expect(TTSProviderSelection.shouldFallBackToLocalVoice(for: ElevenLabsTTSError.httpStatus(401)) == true)
+        #expect(TTSProviderSelection.shouldFallBackToLocalVoice(for: ElevenLabsTTSError.httpStatus(429)) == true)
+        #expect(TTSProviderSelection.shouldFallBackToLocalVoice(for: ElevenLabsTTSError.emptyAudio) == true)
+        #expect(TTSProviderSelection.shouldFallBackToLocalVoice(for: ElevenLabsTTSError.audioDecodeFailed) == true)
         let networkTimeout = URLError(.timedOut)
-        #expect(TTSProviderSelection.shouldFallBackToApple(for: networkTimeout) == true)
+        #expect(TTSProviderSelection.shouldFallBackToLocalVoice(for: networkTimeout) == true)
     }
 
     @Test func cancellationDoesNotFallBack() {
-        #expect(TTSProviderSelection.shouldFallBackToApple(for: CancellationError()) == false)
+        #expect(TTSProviderSelection.shouldFallBackToLocalVoice(for: CancellationError()) == false)
     }
 
     @Test func urlSessionCancellationDoesNotFallBack() {
         // URLSession's async data(for:) surfaces a cancelled Task as
         // URLError(.cancelled), NOT CancellationError. This must also suppress
         // fallback so a re-triggered utterance never overlaps the new one.
-        #expect(TTSProviderSelection.shouldFallBackToApple(for: URLError(.cancelled)) == false)
+        #expect(TTSProviderSelection.shouldFallBackToLocalVoice(for: URLError(.cancelled)) == false)
     }
 
     @Test func nonCancellationURLErrorsStillFallBack() {
         // A genuine network failure (not a cancellation) must still fall back.
-        #expect(TTSProviderSelection.shouldFallBackToApple(for: URLError(.notConnectedToInternet)) == true)
-        #expect(TTSProviderSelection.shouldFallBackToApple(for: URLError(.timedOut)) == true)
+        #expect(TTSProviderSelection.shouldFallBackToLocalVoice(for: URLError(.notConnectedToInternet)) == true)
+        #expect(TTSProviderSelection.shouldFallBackToLocalVoice(for: URLError(.timedOut)) == true)
     }
 
     // MARK: - Speech request construction
