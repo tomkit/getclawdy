@@ -72,3 +72,27 @@ struct SpokenCueArbiterTests {
         #expect(arbiter.scheduledFillerCountForTesting == 0, "a routed/failed turn drops them too")
     }
 }
+
+@MainActor
+private final class SilentFakeTTSClient: SpeechTTSProviding {
+    func speakText(_ text: String) async throws {}
+    var isPlaying: Bool { false }
+    func stopPlayback() {}
+}
+
+@MainActor
+struct SpokenCueSurvivalTests {
+    /// REGRESSION: `stopAllTTS()` runs at the start of every request, right after the keys
+    /// come up. It used to cancel the turn's cues too, so "mm-hm" was cut off (or never heard
+    /// when transcription was quick), the 3/8/15 s fillers never fired, and a queued research
+    /// announcement died whenever a follow-up answer started. The request start must leave
+    /// the turn's cues alone; only a real stop (re-press, Stop button) cancels them.
+    @Test func requestStartKeepsTheTurnsScheduledFillers() {
+        let manager = CompanionManager(loadElevenLabsAPIKeyFromKeychain: { nil }, localTTSClient: SilentFakeTTSClient())
+        manager.setSelectedTTSEngineForTesting(.apple)
+        manager.simulateReleaseThenRequestStartForTesting()
+        #expect(manager.scheduledCueFillerCountForTesting == 3, "the 3 s / 8 s / 15 s fillers are still armed after the request started")
+        manager.cancelQuickAnswer()
+        #expect(manager.scheduledCueFillerCountForTesting == 0, "a real Stop cancels them")
+    }
+}

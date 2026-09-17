@@ -317,3 +317,27 @@ struct ResearchTypedFollowUpTests {
         #expect(session.queuedFollowUpCountForTesting == 0, "an empty draft queues nothing")
     }
 }
+
+struct ResearchRunClockTests {
+    @Test func clockStartsWhenLiveAndFreezesAtTheFirstTerminalPhase() {
+        var clock = ResearchRunClock()
+        let start = Date(timeIntervalSince1970: 1_000)
+        ResearchRunClock.record(phase: .idle, into: &clock, now: start)
+        #expect(clock.startedAt == nil)
+        ResearchRunClock.record(phase: .running, into: &clock, now: start)
+        ResearchRunClock.record(phase: .needsInput, into: &clock, now: start + 5)
+        #expect(clock.startedAt == start, "a later live phase never restarts the clock")
+        #expect(clock.elapsedSeconds(at: start + 102) == 102)
+        ResearchRunClock.record(phase: .done, into: &clock, now: start + 102)
+        ResearchRunClock.record(phase: .stopped, into: &clock, now: start + 500)
+        #expect(clock.endedAt == start + 102, "the first terminal phase freezes the total")
+        #expect(clock.elapsedSeconds(at: start + 999) == 102)
+    }
+
+    @Test func labelIsMinutesAndZeroPaddedSeconds() {
+        #expect(ResearchRunClock.label(forElapsedSeconds: 0) == "0:00")
+        #expect(ResearchRunClock.label(forElapsedSeconds: 7.9) == "0:07")
+        #expect(ResearchRunClock.label(forElapsedSeconds: 102) == "1:42")
+        #expect(ResearchRunClock.label(forElapsedSeconds: 725) == "12:05")
+    }
+}

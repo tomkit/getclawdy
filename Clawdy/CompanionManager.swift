@@ -2254,6 +2254,7 @@ final class CompanionManager: ObservableObject {
     func cancelQuickAnswer() {
         currentResponseTask?.cancel()
         currentResponseTask = nil
+        spokenCues.cancelTurn()
         stopAllTTS()
         clearDetectedElementLocation()
         voiceState = .idle
@@ -2263,8 +2264,12 @@ final class CompanionManager: ObservableObject {
     /// Stops playback on every TTS provider and abandons any streamed-sentence
     /// queue. Called when the user speaks again so a new utterance never overlaps
     /// the previous one.
+    /// Deliberately does NOT touch the spoken cues: this runs at the START of every request
+    /// (right after the keys come up, when "mm-hm" is playing and the fillers are scheduled)
+    /// and before a spoken follow-up answer (when a queued "your page is ready" may be
+    /// playing). Only a real stop — a re-press or the panel's Stop — cancels cues, and
+    /// those call `spokenCues.cancelTurn()` themselves.
     private func stopAllTTS() {
-        spokenCues.cancelTurn()
         currentResponseSpeaker?.cancel()
         currentResponseSpeaker = nil
         currentSentenceBuffer = nil
@@ -2496,6 +2501,17 @@ final class CompanionManager: ObservableObject {
     /// Pins the active TTS engine WITHOUT persisting to UserDefaults (test-only), so a test can
     /// force the refused-fallback speak path onto the injected fake Apple client regardless of
     /// the machine's saved TTS preference (which might select ElevenLabs → a real network call).
+    /// How many acknowledgement fillers are still scheduled for the current turn.
+    var scheduledCueFillerCountForTesting: Int { spokenCues.scheduledFillerCountForTesting }
+
+    /// Drives the push-to-talk release + request start the way a real turn does, so a test
+    /// can check what survives the request's own teardown (`stopAllTTS`).
+    func simulateReleaseThenRequestStartForTesting() {
+        spokenCues.setVoice(currentCueVoice)
+        spokenCues.beginTurn()
+        stopAllTTS()
+    }
+
     func setSelectedTTSEngineForTesting(_ kind: TTSEngineKind) {
         selectedTTSEngineKind = kind
     }

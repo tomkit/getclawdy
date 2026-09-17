@@ -28,7 +28,12 @@ import SwiftUI
 /// `ResearchSession` wires per phase.
 @MainActor
 final class ResearchProgressOverlayViewModel: ObservableObject {
-    @Published var phase: ResearchOverlayPhase = .idle
+    @Published var phase: ResearchOverlayPhase = .idle {
+        didSet { ResearchRunClock.record(phase: phase, into: &runClock) }
+    }
+    /// When the run started / ended, for the toast's elapsed-time label (a research run is
+    /// one to three minutes; a quietly ticking clock is what tells the user it isn't stuck).
+    @Published var runClock = ResearchRunClock()
     @Published var taskDescription: String = ""
     @Published var statusLine: String = ""
     @Published var stepLog: [ResearchStepLogEntry] = []
@@ -101,6 +106,56 @@ enum ResearchFullToastGeometry {
 
     /// The full toast footprint — the one size every active toast renders at.
     static var toastSize: CGSize { ResearchStackFrameLayout.expandedPillSize }
+}
+
+// MARK: - Run clock (elapsed time) — pure, testable
+
+/// The start/end instants of one run, derived from phase transitions: the clock starts
+/// the first time the run is live (running / needs input) and freezes at the first
+/// terminal phase (done / error / stopped), so the finished toast shows the total.
+struct ResearchRunClock: Equatable {
+    var startedAt: Date?
+    var endedAt: Date?
+
+    static func record(phase: ResearchOverlayPhase, into clock: inout ResearchRunClock, now: Date = Date()) {
+        switch phase {
+        case .running, .needsInput:
+            if clock.startedAt == nil { clock.startedAt = now }
+        case .done, .error, .stopped:
+            if clock.startedAt != nil, clock.endedAt == nil { clock.endedAt = now }
+        case .idle:
+            break
+        }
+    }
+
+    /// Seconds elapsed at `now` (or at the freeze point once the run ended); nil before start.
+    func elapsedSeconds(at now: Date) -> TimeInterval? {
+        guard let startedAt else { return nil }
+        return max(0, (endedAt ?? now).timeIntervalSince(startedAt))
+    }
+
+    /// "0:07", "1:42", "12:05" — minutes:seconds, no hours (a research run is minutes).
+    static func label(forElapsedSeconds seconds: TimeInterval) -> String {
+        let whole = Int(seconds.rounded(.down))
+        return String(format: "%d:%02d", whole / 60, whole % 60)
+    }
+}
+
+/// The ticking elapsed-time label on the toast's title row. Tabular digits so it never
+/// jitters; `TimelineView` redraws once a second only while the run is live.
+struct ResearchElapsedTimeLabel: View {
+    let runClock: ResearchRunClock
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: runClock.endedAt == nil ? 1 : 3600)) { context in
+            if let seconds = runClock.elapsedSeconds(at: context.date) {
+                Text(ResearchRunClock.label(forElapsedSeconds: seconds))
+                    .font(DS.Font.overlayCaptionRegular.monospacedDigit())
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .accessibilityLabel("Elapsed \(Int(seconds)) seconds")
+            }
+        }
+    }
 }
 
 // MARK: - Live-step signals (step glyph + word) — pure, testable
@@ -289,11 +344,17 @@ struct ResearchFullToastView: View {
             .frame(width: 28, height: 28)
 
             VStack(alignment: .leading, spacing: DS.Spacing.hairline) {
-                Text(viewModel.taskDescription.isEmpty ? "Research" : viewModel.taskDescription)
-                    .font(DS.Font.overlayCaption)
-                    .foregroundColor(DS.Colors.textSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                HStack(spacing: DS.Spacing.compact) {
+                    Text(viewModel.taskDescription.isEmpty ? "Research" : viewModel.taskDescription)
+                        .font(DS.Font.overlayCaption)
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: DS.Spacing.compact)
+                    // The quiet clock: the one signal a minutes-long run needs so it never
+                    // reads as stuck. Frozen at the total once the run ends.
+                    ResearchElapsedTimeLabel(runClock: viewModel.runClock)
+                }
                 statusRow
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -347,17 +408,21 @@ struct ResearchFullToastView: View {
         (statusIsActionable || viewModel.phase == .error) ? .semibold : .regular
     }
 
-    /// The leading glyph inside the progress ring — a cursor arrow while working, a
-    /// checkmark when done, and a distinctly RED warning triangle for a FAILED (.error) run
-    /// so a failure reads unmistakably as a failure (not the muted white mark a stopped run
-    /// shows). A user-stopped run keeps the calm white exclamation.
+    /// The leading glyph inside the progress ring — the brand claw (the same `CursorClaw`
+    /// art as the cursor and menu bar, in brand red) while working, a checkmark when done,
+    /// and a distinctly RED warning triangle for a FAILED (.error) run so a failure reads
+    /// unmistakably as a failure (not the muted white mark a stopped run shows). A
+    /// user-stopped run keeps the calm white exclamation.
     @ViewBuilder
     private var badgeGlyph: some View {
         switch viewModel.phase {
         case .running, .needsInput:
-            Image(systemName: "cursorarrow")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.white)
+            Image("CursorClaw")
+                .resizable()
+                .renderingMode(.template)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 18, height: 18)
+                .foregroundColor(DS.Colors.openClawRed)
         case .done:
             Image(systemName: "checkmark")
                 .font(DS.Font.titleBold)
