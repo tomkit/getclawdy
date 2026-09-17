@@ -4,7 +4,7 @@
 
 <h1 align="center">Your AI, out of its shell.</h1>
 
-<p align="center">Clawdy is a voice assistant for your Mac that can see your screen and point at things.</p>
+<p align="center">Talk to your Mac. Clawdy sees your screen, talks back, and points at things.</p>
 
 <p align="center">
   <a href="https://getclawdy.com">getclawdy.com</a> ·
@@ -16,11 +16,13 @@
   <img src="assets/clawdy-hero.png" width="860" alt="Clawdy, a small red lobster, climbing out of a broken terminal window next to a spreadsheet." />
 </p>
 
+Hold Control + Option and say what you need. Clawdy looks at your screen, answers you out loud, and the claw flies to whatever it's talking about. It's a conversation: ask a follow-up, and it remembers what you were just talking about.
+
 Clawdy runs on your own local Claude Code or Codex, using your subscription tokens. No account, nothing extra to pay for, and your voice stays on your Mac.
 
+- You talk. Hold the keys and speak. No typing.
 - It sees what you see. Every window, every monitor.
-- Just say it. Hold Control + Option and talk. No typing.
-- It talks back, out loud.
+- It talks back, out loud, while you keep working.
 - It points. The claw cursor lands on the exact spot.
 
 <p align="center">
@@ -37,7 +39,7 @@ Clawdy runs on your own local Claude Code or Codex, using your subscription toke
 - "What do they actually want from me in this email?"
 - "Find me three laptops under $900 and put it on one page."
 
-Clawdy answers out loud and the claw points things out. Bigger tasks get handed to your local harness, so everything you've set up there (subagents, prompts, plugins, skills) comes along.
+Say any of these out loud. Clawdy answers out loud and the claw points things out. Bigger tasks get handed to your local harness, so everything you've set up there (subagents, prompts, plugins, skills) comes along.
 
 ## Example: planning a road trip
 
