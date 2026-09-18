@@ -119,7 +119,8 @@ shasum -a 256 Clawdy.dmg
 
 | Version | Date | SHA-256 of `Clawdy.dmg` |
 |---|---|---|
-| [0.0.3](https://github.com/tomkit/getclawdy/releases/tag/v0.0.3) (latest) | 2026-09-17 | `157abd35d6f2d64f2c1ef962b5ee10958d570c3e1b1997badb183eb502d252e8` |
+| [0.0.4](https://github.com/tomkit/getclawdy/releases/tag/v0.0.4) (latest) | 2026-09-18 | `3681a8f3de81eddf3441d0c3bdae3838803f540cb9c24778c7e52fd471380b2a` |
+| [0.0.3](https://github.com/tomkit/getclawdy/releases/tag/v0.0.3) | 2026-09-17 | `157abd35d6f2d64f2c1ef962b5ee10958d570c3e1b1997badb183eb502d252e8` |
 | [0.0.2](https://github.com/tomkit/getclawdy/releases/tag/v0.0.2) | 2026-07-10 | `051567a69fe3d0409617e54eb90ca6132f8352052e780effbf51aca19d145804` |
 | [0.0.1](https://github.com/tomkit/getclawdy/releases/tag/v0.0.1) | 2026-07-10 | `0e908a1da69528d25e93ae66b8a615480ac9e9fe51d8a778464c2ade0aaf1ae3` |
 
@@ -127,6 +128,6 @@ What changed in each is in the [changelog](CHANGELOG.md).
 
 ## Credits and license
 
-Clawdy is a fork of [heyclicky](https://heyclicky.com), rebuilt to run on the coding CLI you already have instead of a hosted backend. Clawdy's code is MIT (`LICENSE`); the upstream notice is in `NOTICE`. The built-in voice is [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) (Apache-2.0) with the [Misaki](https://github.com/hexgrad/misaki) pronunciation engine, via a fork of [MisakiSwift](https://github.com/mlalma/MisakiSwift) in `Packages/ClawdyVoice`, running on ONNX Runtime. Bundled third-party components are listed in `THIRD-PARTY-LICENSES.md`.
+Clawdy is a fork of [heyclicky](https://heyclicky.com), rebuilt to run on the coding CLI you already have. MIT licensed (`LICENSE`). The built-in voice is [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M); every bundled component and its license is listed in `THIRD-PARTY-LICENSES.md`.
 
 To teach the voice a word (a name, a product), add a line to `~/.clawdy/pronunciations.txt`; the file explains the format.
