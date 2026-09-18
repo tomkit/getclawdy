@@ -71,7 +71,7 @@ Because it's your real CLI, your setup comes with it: CLAUDE.md, skills, plugins
 
 Clawdy is a lead agent. It can answer simple questions on its own and will respond quickly. For bigger questions, it will route to a subagent or trigger a plugin (mcp, skill, tool) to help it answer the question.
 
-The prompt that makes that call is a file you can edit: `~/.clawdy/router.md`. Clawdy writes it on first launch and reads it before every question, so changes apply right away. Keep the `{{clawdy_skills}}` and `{{harness_skills}}` placeholders; that's where the skill list goes.
+The routing prompt is at: `~/.clawdy/router.md`.
 
 ## Skills
 
