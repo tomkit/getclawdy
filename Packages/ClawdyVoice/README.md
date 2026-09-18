@@ -15,6 +15,10 @@ Kokoro-82M speech model on ONNX Runtime. No network, no key, no espeak.
     dotted abbreviations, "twenty" was missing from num2words, currency detached from decimal
     amounts, "%" was swallowed, intra-word hyphens were spoken as a dash, a lowercase sentence
     start glued the period onto the previous word, and the fallback network is fed lowercase.
+  - `RomajiPronunciation.swift` (Clawdy addition): a rule-based reading for Japanese words in
+    Hepburn romaji ("Aomori", "Shibuya", "Nakamura") when the lexicon doesn't know them — the
+    English-trained fallback network mangles these; romaji is a regular syllabary, so the
+    reading is exact. Only words that parse completely as romaji are claimed.
 - `KokoroSynthesizer.swift` — the ONNX session, tokenization against the Kokoro v1.0 vocabulary,
   the 510-token chunker, voice loading, and the `[word](/phonemes/)` pronunciation-override pass.
 - `SpokenTextNormalizer.swift` — reply text → speakable words (markdown, URLs, times, key chords).

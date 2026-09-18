@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Japanese names are pronounced properly by the built-in voice ("Aomori", "Shibuya", "Nebuta"): romanized Japanese is read syllable by syllable instead of being guessed as English spelling.
 - **A built-in voice.** Clawdy now talks back with its own bundled voice (Kokoro, running on your Mac — nothing is sent anywhere) instead of the robotic system voice. Six voices to pick from in the panel; "Heart" is the default. ElevenLabs is still there if you'd rather use your own key. Teach it names and product words in `~/.clawdy/pronunciations.txt`. The download is about 170 MB bigger for it.
 - The "thinking…" pill by the claw now appears the moment the model actually starts reasoning (or after 2.5 s of silence), not after 10 s — a quiet visual sign the turn is alive, with no extra spoken cue.
 - The claw's pointing is timed to the built-in voice too: it lands on each element as it is named, sentence by sentence (previously only ElevenLabs had timing; with the built-in voice the cursor walked ahead of the speech).

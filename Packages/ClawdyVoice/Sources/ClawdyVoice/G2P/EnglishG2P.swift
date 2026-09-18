@@ -266,6 +266,17 @@ final public class EnglishG2P {
     return result
   }
 
+  /// A word the lexicon doesn't know: a romaji (Japanese) reading when the spelling parses
+  /// as one — exact, where the English-trained network only guesses — else the network.
+  static let romajiRating = 2
+  private func pronounceUnknownWord(_ token: MToken) -> (String, Int) {
+    if let romaji = RomajiPronunciation.phonemes(for: token.text) {
+      return (romaji, EnglishG2P.romajiRating)
+    }
+    let out = fallback(token)
+    return (out.phoneme, out.rating)
+  }
+
   /// NLTagger splits "Wi-Fi" / "mm-hm" / "well-known" into `word - word`, whereas spaCy (which
   /// Python misaki tokenizes with) keeps an intra-word hyphen inside ONE token. Re-join those
   /// runs so the lexicon can try the whole compound first and the subtokenizer then splits it
@@ -489,7 +500,7 @@ final public class EnglishG2P {
         }
         
         if w.phonemes == nil {
-          let out = fallback(w)
+          let out = pronounceUnknownWord(w)
           w.phonemes = out.0
           w.`_`.rating = out.1
         }
@@ -536,7 +547,7 @@ final public class EnglishG2P {
         if shouldFallback {
           let token = mergeTokens(arr)
           let first = arr[0]
-          let out = fallback(token)
+          let out = pronounceUnknownWord(token)
           first.phonemes = out.0
           first.`_`.rating = out.1
           arr[0] = first

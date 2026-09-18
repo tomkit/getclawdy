@@ -141,7 +141,7 @@ final class KokoroSynthesizerTests: XCTestCase {
     func testGuessedWordsAreTheOnesTheLexiconDidNotKnow() async throws {
         let synthesizer = try makeSynthesizer()
         let guessed = await synthesizer.guessedWords(in: "Open Xcode and ask Nakamura about the formula, then ping tomkit.")
-        XCTAssertEqual(guessed, ["Xcode", "Nakamura", "tomkit"])
+        XCTAssertEqual(guessed, ["Xcode", "tomkit"], "Nakamura is read as romaji, not guessed")
         let none = await synthesizer.guessedWords(in: "The quick brown fox jumps over the lazy dog.")
         XCTAssertEqual(none, [])
         // Built-in and user overrides are not guesses.

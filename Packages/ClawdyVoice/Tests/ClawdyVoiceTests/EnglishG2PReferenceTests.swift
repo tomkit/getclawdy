@@ -101,3 +101,34 @@ final class EnglishG2PReferenceTests: XCTestCase {
         XCTAssertEqual(phonemes, "klˈɔdi ɪz ɹˈɛdi.")
     }
 }
+
+final class RomajiPronunciationTests: XCTestCase {
+    /// Japanese words in Hepburn romaji get a rule-based reading (penultimate stress),
+    /// instead of the English fallback network's guess.
+    func testRomajiWordsAreReadBySyllable() {
+        XCTAssertEqual(RomajiPronunciation.phonemes(for: "Aomori"), "ɑOmˈOɹi")
+        XCTAssertEqual(RomajiPronunciation.phonemes(for: "Shibuya"), "ʃibˈujɑ")
+        XCTAssertEqual(RomajiPronunciation.phonemes(for: "Nebuta"), "nɛbˈutɑ")
+        XCTAssertEqual(RomajiPronunciation.phonemes(for: "Nakamura"), "nɑkɑmˈuɹɑ")
+        XCTAssertEqual(RomajiPronunciation.phonemes(for: "Shinjuku"), "ʃinʤˈuku")
+        XCTAssertEqual(RomajiPronunciation.phonemes(for: "Nihon"), "nˈihOn")
+        XCTAssertEqual(RomajiPronunciation.phonemes(for: "Sapporo"), "sɑpˈOɹO")
+        XCTAssertEqual(RomajiPronunciation.phonemes(for: "Kannami"), "kɑnnˈɑmi")
+        XCTAssertEqual(RomajiPronunciation.phonemes(for: "Ryokan"), "ɹjˈOkɑn")
+    }
+
+    /// English spellings that don't parse as romaji are left to the network.
+    func testNonRomajiWordsAreNotClaimed() {
+        for word in ["clawdy", "tomkit", "Xcode", "Vercel", "Figma", "Szymanski", "Okonkwo", "ab"] {
+            XCTAssertNil(RomajiPronunciation.phonemes(for: word), word)
+        }
+    }
+
+    func testG2PUsesTheRomajiReadingForUnknownJapaneseWordsOnly() {
+        let g2p = EnglishG2P(british: false)
+        let (phonemes, tokens) = g2p.phonemize(text: "Aomori and Tokyo, then clawdy.")
+        XCTAssertEqual(phonemes, "ɑOmˈOɹi ænd tˈOkiˌO, ðˈɛn klˈɔdi.")
+        XCTAssertEqual(tokens.first?._.rating, EnglishG2P.romajiRating)
+        XCTAssertEqual(tokens.last { $0.text == "clawdy" }?._.rating, EnglishFallbackNetwork.fallbackRating)
+    }
+}
