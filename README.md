@@ -99,24 +99,15 @@ Now say "what can I make with eggs and spinach."
 
 ## Build from source
 
-You need macOS 14.2+ and Xcode 16+. Point the command line tools at it: `sudo xcode-select -s /Applications/Xcode.app`.
+You need macOS 14.2+ and Xcode 16+. 
 
 ```bash
+sudo xcode-select -s /Applications/Xcode.app
 git clone https://github.com/tomkit/getclawdy.git
 cd getclawdy
 ./scripts/fetch-models.sh   # downloads the ~170 MB Kokoro voice model into Clawdy/Models/ (once)
 open Clawdy.xcodeproj
 ```
-
-The voice model is too big for git, so the fetch script pulls it from the Kokoro-ONNX release and checks its SHA-256; the Xcode build also runs it, but a fresh clone needs one build after the download for the file to be bundled. In Xcode, pick the Clawdy scheme and the My Mac destination, set your team under Signing & Capabilities (a personal Apple ID is fine), and press Cmd + R. The app shows up in the menu bar; there's no dock icon or window. First launch asks for Microphone, Speech Recognition, Accessibility, and Screen Recording. Grant them and relaunch. They're tied to the code signature, so a build signed differently will ask again.
-
-Tests: Cmd + U, or
-
-```bash
-xcodebuild test -project Clawdy.xcodeproj -scheme Clawdy -destination 'platform=macOS' -only-testing:ClawdyTests CODE_SIGNING_ALLOWED=NO
-```
-
-Build from Xcode for day-to-day work. Terminal `xcodebuild` runs can reset the permissions above.
 
 ## Releases
 
