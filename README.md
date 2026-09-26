@@ -16,7 +16,7 @@
   <img src="assets/clawdy-hero.png" width="860" alt="Clawdy, a small red lobster, climbing out of a broken terminal window next to a spreadsheet." />
 </p>
 
-Hold Control + Option and say what you need. Clawdy looks at your screen, answers you out loud, and the claw flies to whatever it's talking about. It's a conversation: ask a follow-up, and it remembers what you were just talking about.
+Clawdy is a free, open-source AI cursor assistant for macOS. Hold Control + Option and say what you need, and Clawdy looks at your screen, answers you out loud, and the claw flies to whatever it's talking about. It's a conversation: ask a follow-up, and it remembers what you were just talking about.
 
 Clawdy runs on your own local Claude Code or Codex, using your subscription tokens. No account, nothing extra to pay for, and your voice stays on your Mac. The voice it talks back with is built in too (Kokoro, running on your Mac), so nothing you say or hear leaves the machine.
 

@@ -1,0 +1,24 @@
+# Clawdy
+
+> Clawdy is a free, MIT-licensed, open-source AI cursor assistant for macOS. Hold Control+Option and ask a question out loud; Clawdy screenshots your screen, sends the screenshots and your question to the Claude Code or Codex CLI you already have installed and signed into, speaks the answer, and moves a red claw cursor to the UI elements it mentions.
+
+Clawdy is a menu-bar app for macOS 14.2 or later, built as a universal binary for Apple Silicon and Intel Macs. It started as a fork of the open-source Clicky project (MIT) and is an independent open-source alternative to it. It is not affiliated with or endorsed by Anthropic, OpenAI, or Clicky.
+
+## How it works
+
+- Push-to-talk: hold Control+Option and speak. Speech-to-text runs on-device with Apple's speech recognition.
+- Screen context: Clawdy captures your screen(s) and sends them with your question to your local `claude` (Claude Code) or `codex` (Codex) CLI.
+- Cost: the app is free. Model usage is billed to your existing Claude Code or Codex subscription. No model API keys are needed.
+- Voice: answers are spoken with a bundled on-device voice. An ElevenLabs voice is optional with your own API key.
+- Pointing: a red claw cursor points at the buttons, fields, and other UI elements the answer mentions.
+- Annotations: you can draw on your screen while talking, and Clawdy sees the marks.
+- Research mode: bigger requests are handed to a skill that builds a web page with the result.
+- Terminal handoff: Clawdy sessions can be resumed in the `claude` or `codex` CLI.
+
+## Links
+
+- [Download Clawdy for Mac (DMG)](https://github.com/tomkit/getclawdy/releases/latest/download/Clawdy.dmg): latest release
+- [Source code on GitHub](https://github.com/tomkit/getclawdy): MIT licensed
+- [README](https://github.com/tomkit/getclawdy/blob/main/README.md): setup, permissions, and build instructions
+- [Changelog](https://github.com/tomkit/getclawdy/blob/main/CHANGELOG.md): release notes
+- [Website](https://getclawdy.com/)
