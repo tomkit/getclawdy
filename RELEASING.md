@@ -35,14 +35,22 @@ You need an Apple Developer Program membership (team `M2U28D32J3`) and:
    ```
    The build number defaults to the pbxproj's `CURRENT_PROJECT_VERSION` + 1 (shown in the
    confirmation prompt); pass it explicitly to override: `./scripts/release.sh 0.0.5 7`.
+   It must be a positive integer without leading zeros. Re-running for a version the
+   pbxproj already has reuses that build rather than adding 1.
    It first writes the version into `Clawdy.xcodeproj/project.pbxproj` (`MARKETING_VERSION`
    and `CURRENT_PROJECT_VERSION`, every config) and `site/index.html` (`softwareVersion`) and
    commits them as `release: vX.Y.Z`, so the tag points at sources that say the right
    version. Then it archives, exports a Developer ID-signed `Clawdy.app`, wraps it in a DMG,
-   submits the DMG to Apple for notarization, staples the ticket, generates `SHA256SUMS`, creates the
-   `v0.0.1` git tag, pushes the tag and (when run from `main`) the release commit, and
+   submits the DMG to Apple for notarization, staples the ticket, generates `SHA256SUMS`,
+   creates the `v0.0.1` git tag, pushes the tag and (when run from `main`) the release commit, and
    publishes a GitHub Release with the DMG + checksums + changelog notes. From another
    branch it warns and leaves pushing the release commit to you.
+
+   If the build or notarization fails, the `release: vX.Y.Z` commit stays local and
+   unpushed. Re-run the same command (it reuses the commit), or drop it with
+   `git reset HEAD~1` (keeps your working tree) if you want to change something. If the
+   tag already exists at a different commit, the script stops before archiving; delete
+   the stale tag (locally and on origin) or release a new version.
 3. If `README.md` lists per-release checksums, add the new SHA-256 (from `SHA256SUMS`) by
    hand and commit it; the script doesn't touch `README.md`.
 4. Verify the published release page, then announce.

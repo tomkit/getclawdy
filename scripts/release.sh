@@ -43,11 +43,20 @@ DMG_PATH="${DIST_DIR}/${APP_NAME}.dmg"
 PBXPROJ="Clawdy.xcodeproj/project.pbxproj"
 SITE_HTML="site/index.html"
 
+# Values that reach a sed replacement below must match these, so nothing like
+# `&`, `/` or `\` can alter the substitution. Builds are plain positive decimals:
+# no leading zero, which bash arithmetic would read as octal (08 errors, 010 = 8).
+SEMVER_RE='^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$'
+BUILD_RE='^[1-9][0-9]*$'
+
 # Rewrite the version in the checked-in sources under $1 (repo root).
 # Only touches the MARKETING_VERSION / CURRENT_PROJECT_VERSION keys (every build
-# config) and the JSON-LD softwareVersion, so it's safe to re-run.
+# config) and the JSON-LD softwareVersion, so it's safe to re-run. Refuses
+# unvalidated input itself so no caller can write a bad value.
 write_version() {
   local root="$1" version="$2" build="$3"
+  [[ "$version" =~ $SEMVER_RE ]] || { echo "❌ refusing to write version '${version}'" >&2; return 1; }
+  [[ "$build" =~ $BUILD_RE ]] || { echo "❌ refusing to write build '${build}'" >&2; return 1; }
   sed -i '' -E \
     -e "s/(MARKETING_VERSION = )[^;]+;/\\1${version};/" \
     -e "s/(CURRENT_PROJECT_VERSION = )[^;]+;/\\1${build};/" \
@@ -55,25 +64,53 @@ write_version() {
   sed -i '' -E "s/(\"softwareVersion\": \")[^\"]*\"/\\1${version}\"/" "${root}/${SITE_HTML}"
 }
 
-# Print the build number to use when none is given: the pbxproj's current
-# CURRENT_PROJECT_VERSION + 1. If the pbxproj already has this marketing version
-# (re-running a release after step 0 committed), reuse its build instead, so the
-# re-run doesn't bump it again. Fails if the configs disagree or it's not an integer.
-default_build() {
-  local root="$1" version="$2" builds
+# Print the pbxproj's CURRENT_PROJECT_VERSION. Fails if the configs disagree or
+# it isn't a valid build, since +1 or a rewrite would then paper over the mess.
+current_build() {
+  local root="$1" builds
   builds=$(sed -nE 's/.*CURRENT_PROJECT_VERSION = ([^;]+);.*/\1/p' "${root}/${PBXPROJ}" | sort -u)
   if [ "$(printf '%s\n' "$builds" | wc -l | tr -d ' ')" != 1 ]; then
     echo "❌ CURRENT_PROJECT_VERSION differs across configs in ${PBXPROJ}:" $builds >&2; return 1
   fi
-  if ! [[ "$builds" =~ ^[0-9]+$ ]]; then
-    echo "❌ CURRENT_PROJECT_VERSION in ${PBXPROJ} is '${builds}', not an integer" >&2; return 1
+  if ! [[ "$builds" =~ $BUILD_RE ]]; then
+    echo "❌ CURRENT_PROJECT_VERSION in ${PBXPROJ} is '${builds}', not a positive integer" >&2; return 1
   fi
+  echo "$builds"
+}
+
+# Print the build number to use when none is given: the current build + 1. If
+# the pbxproj already has this marketing version (re-running a release after
+# step 0 committed), reuse its build instead, so the re-run doesn't bump it again.
+default_build() {
+  local root="$1" version="$2" build
+  build=$(current_build "$root") || return 1
   if [ "$(grep -c 'MARKETING_VERSION = ' "${root}/${PBXPROJ}")" = \
        "$(grep -cF "MARKETING_VERSION = ${version};" "${root}/${PBXPROJ}")" ]; then
-    echo "$builds"
+    echo "$build"
   else
-    echo $((builds + 1))
+    echo $((10#$build + 1))
   fi
+}
+
+# Fail if tag $2 already exists, locally or on origin, at anything but HEAD.
+# Otherwise a retry with a different build would make a new release commit
+# but publish the old tag's.
+check_tag() {
+  local root="$1" tag="$2" head local_c remote remote_c c
+  head=$(git -C "$root" rev-parse HEAD)
+  local_c=$(git -C "$root" rev-parse -q --verify "refs/tags/${tag}^{commit}" || true)
+  remote=$(git -C "$root" ls-remote --tags origin "refs/tags/${tag}" "refs/tags/${tag}^{}") \
+    || { echo "❌ Couldn't list tags on origin to check ${tag}" >&2; return 1; }
+  # An annotated tag lists as its tag object; the "^{}" line (only returned when
+  # asked for by name) is the commit it points at, so prefer that.
+  remote_c=$(awk -v t="refs/tags/${tag}" '$2==t"^{}"{p=$1} $2==t{r=$1} END{print (p!="" ? p : r)}' <<<"$remote")
+  for c in "$local_c" "$remote_c"; do
+    if [ -n "$c" ] && [ "$c" != "$head" ]; then
+      echo "❌ Tag ${tag} already exists at ${c}, not at HEAD (${head})." >&2
+      echo "   Delete the tag (locally and on origin) or release a new version." >&2
+      return 1
+    fi
+  done
 }
 
 # -- Version --
@@ -85,7 +122,7 @@ VERSION="${1#v}"
 BUILD_NUMBER="${2:-}"
 TAG="v${VERSION}"
 
-if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+if ! [[ "$VERSION" =~ $SEMVER_RE ]]; then
   echo "❌ '$VERSION' is not a SemVer version (e.g. 0.0.1)"; exit 1
 fi
 
@@ -94,9 +131,13 @@ if gh release view "$TAG" --repo "$GITHUB_REPO" &>/dev/null; then
   exit 1
 fi
 
+# Check the pbxproj's configs agree even when the build is given explicitly.
+current_build "$PROJECT_DIR" >/dev/null || exit 1
 if [ -z "$BUILD_NUMBER" ]; then
   BUILD_NUMBER=$(default_build "$PROJECT_DIR" "$VERSION") || exit 1
   BUILD_NOTE=" (default: ${PBXPROJ} + 1)"
+elif ! [[ "$BUILD_NUMBER" =~ $BUILD_RE ]]; then
+  echo "❌ Build '${BUILD_NUMBER}' must be a positive integer without leading zeros (e.g. 5)"; exit 1
 fi
 
 echo ""
@@ -114,6 +155,8 @@ if git -C "$PROJECT_DIR" diff --quiet HEAD -- "$PBXPROJ" "$SITE_HTML"; then
 else
   git -C "$PROJECT_DIR" commit -m "release: ${TAG}" -- "$PBXPROJ" "$SITE_HTML"
 fi
+# Before the slow archive/notarize: an existing tag must already be this commit.
+check_tag "$PROJECT_DIR" "$TAG" || exit 1
 
 # -- 1. Clean --
 rm -rf "$BUILD_DIR"

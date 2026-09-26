@@ -7,8 +7,11 @@ GitHub Releases on `tomkit/getclawdy`.
 
 ```bash
 ./scripts/release.sh 0.0.1        # build number defaults to project.pbxproj's + 1
-./scripts/release.sh 0.0.1 3      # explicit build number
+./scripts/release.sh 0.0.1 3      # explicit build number (positive, no leading zeros)
 ```
+
+Re-running for a version the pbxproj already has reuses its build number instead
+of adding 1.
 
 What it does:
 
@@ -24,7 +27,10 @@ What it does:
    using the matching `CHANGELOG.md` section as the release notes. Pushes the tag, and
    the release commit too when run from `main` (otherwise it warns and you push it).
 
-It refuses to overwrite an existing release and prompts for confirmation before building.
+It refuses to overwrite an existing release, stops before archiving if the tag already
+exists at a different commit, and prompts for confirmation before building. A failed
+build or notarization leaves the release commit local and unpushed: re-run the same
+command, or `git reset HEAD~1` to drop it (working tree kept).
 
 See [`../RELEASING.md`](../RELEASING.md) for one-time setup (Developer ID certificate,
 notarization credentials, `create-dmg` / `gh`) and the full release checklist.
