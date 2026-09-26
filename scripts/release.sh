@@ -18,7 +18,7 @@ export PATH="/opt/homebrew/bin:$PATH"
 #   6. Tag the release (vX.Y.Z) and publish a GitHub Release with the DMG + checksums.
 #
 # Usage:
-#   ./scripts/release.sh 0.0.1          # marketing version, build number defaults to 1
+#   ./scripts/release.sh 0.0.1          # build number defaults to project.pbxproj's + 1
 #   ./scripts/release.sh 0.0.1 3        # explicit build number
 #
 # One-time prerequisites (see RELEASING.md):
@@ -55,13 +55,34 @@ write_version() {
   sed -i '' -E "s/(\"softwareVersion\": \")[^\"]*\"/\\1${version}\"/" "${root}/${SITE_HTML}"
 }
 
+# Print the build number to use when none is given: the pbxproj's current
+# CURRENT_PROJECT_VERSION + 1. If the pbxproj already has this marketing version
+# (re-running a release after step 0 committed), reuse its build instead, so the
+# re-run doesn't bump it again. Fails if the configs disagree or it's not an integer.
+default_build() {
+  local root="$1" version="$2" builds
+  builds=$(sed -nE 's/.*CURRENT_PROJECT_VERSION = ([^;]+);.*/\1/p' "${root}/${PBXPROJ}" | sort -u)
+  if [ "$(printf '%s\n' "$builds" | wc -l | tr -d ' ')" != 1 ]; then
+    echo "❌ CURRENT_PROJECT_VERSION differs across configs in ${PBXPROJ}:" $builds >&2; return 1
+  fi
+  if ! [[ "$builds" =~ ^[0-9]+$ ]]; then
+    echo "❌ CURRENT_PROJECT_VERSION in ${PBXPROJ} is '${builds}', not an integer" >&2; return 1
+  fi
+  if [ "$(grep -c 'MARKETING_VERSION = ' "${root}/${PBXPROJ}")" = \
+       "$(grep -cF "MARKETING_VERSION = ${version};" "${root}/${PBXPROJ}")" ]; then
+    echo "$builds"
+  else
+    echo $((builds + 1))
+  fi
+}
+
 # -- Version --
 if [ $# -lt 1 ]; then
   echo "Usage: $0 <version> [build]    e.g. $0 0.0.1"
   exit 1
 fi
 VERSION="${1#v}"
-BUILD_NUMBER="${2:-1}"
+BUILD_NUMBER="${2:-}"
 TAG="v${VERSION}"
 
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
@@ -73,8 +94,13 @@ if gh release view "$TAG" --repo "$GITHUB_REPO" &>/dev/null; then
   exit 1
 fi
 
+if [ -z "$BUILD_NUMBER" ]; then
+  BUILD_NUMBER=$(default_build "$PROJECT_DIR" "$VERSION") || exit 1
+  BUILD_NOTE=" (default: ${PBXPROJ} + 1)"
+fi
+
 echo ""
-echo "🚀 Releasing ${APP_NAME} ${TAG} (build ${BUILD_NUMBER}) -> ${GITHUB_REPO}"
+echo "🚀 Releasing ${APP_NAME} ${TAG} (build ${BUILD_NUMBER}${BUILD_NOTE:-}) -> ${GITHUB_REPO}"
 read -p "   Proceed? (y/N) " -n 1 -r; echo ""
 [[ $REPLY =~ ^[Yy]$ ]] || { echo "   Aborted."; exit 0; }
 
@@ -158,7 +184,16 @@ echo "🧾 Generating SHA256SUMS..."
 echo "🏷️  Tagging ${TAG}..."
 git -C "$PROJECT_DIR" tag -a "$TAG" -m "Clawdy ${TAG}" 2>/dev/null || echo "   (tag ${TAG} already exists locally)"
 git -C "$PROJECT_DIR" push origin "$TAG" || echo "   (push the tag manually: git push origin ${TAG})"
-echo "   Push the release commit to your branch too: git push origin HEAD"
+# The tag push uploads the step-0 commit but doesn't move any branch, so push it
+# to main too. Only from main: on another branch, pushing HEAD would publish that
+# branch, which is the releaser's call. Never forced; a rejected push just warns.
+BRANCH=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD)
+if [ "$BRANCH" = "main" ]; then
+  git -C "$PROJECT_DIR" push origin HEAD || echo "   ⚠️  Push of main failed; push it manually: git push origin HEAD"
+else
+  echo "   ⚠️  Released from '${BRANCH}', not main: the release commit isn't on origin/main."
+  echo "      Push/merge it yourself (git push origin HEAD)."
+fi
 
 # -- 8. GitHub Release (notes pulled from CHANGELOG.md) --
 NOTES=$(awk "/^## \\[${VERSION}\\]/{f=1;next} /^## \\[/{f=0} f" "${PROJECT_DIR}/CHANGELOG.md")
