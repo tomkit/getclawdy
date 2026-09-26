@@ -12,12 +12,16 @@ GitHub Releases on `tomkit/getclawdy`.
 
 What it does:
 
-1. Archives the app with `xcodebuild` at the given version.
-2. Exports a Developer ID–signed `Clawdy.app`.
-3. Wraps it in a DMG (drag-to-Applications).
-4. Notarizes the DMG with Apple and staples the ticket.
-5. Generates `SHA256SUMS`.
-6. Tags the release (`vX.Y.Z`) and creates a GitHub Release with the DMG + checksums,
+1. Writes the version into `project.pbxproj` (`MARKETING_VERSION` /
+   `CURRENT_PROJECT_VERSION`, all configs) and `site/index.html` (`softwareVersion`),
+   and commits them as `release: vX.Y.Z` (skipped if they already match). The script
+   pushes only the tag, so push the commit yourself.
+2. Archives the app with `xcodebuild` from those committed values.
+3. Exports a Developer ID–signed `Clawdy.app`.
+4. Wraps it in a DMG (drag-to-Applications).
+5. Notarizes the DMG with Apple and staples the ticket.
+6. Generates `SHA256SUMS`.
+7. Tags the release (`vX.Y.Z`) and creates a GitHub Release with the DMG + checksums,
    using the matching `CHANGELOG.md` section as the release notes.
 
 It refuses to overwrite an existing release and prompts for confirmation before building.

@@ -33,11 +33,16 @@ You need an Apple Developer Program membership (team `M2U28D32J3`) and:
    ```bash
    ./scripts/release.sh 0.0.1
    ```
-   It archives, exports a Developer ID-signed `Clawdy.app`, wraps it in a DMG, submits the
-   DMG to Apple for notarization, staples the ticket, generates `SHA256SUMS`, creates the
+   Pass the build number too (`./scripts/release.sh 0.0.5 5`); it defaults to 1.
+   It first writes the version into `Clawdy.xcodeproj/project.pbxproj` (`MARKETING_VERSION`
+   and `CURRENT_PROJECT_VERSION`, every config) and `site/index.html` (`softwareVersion`) and
+   commits them as `release: vX.Y.Z`, so the tag points at sources that say the right
+   version. Then it archives, exports a Developer ID-signed `Clawdy.app`, wraps it in a DMG,
+   submits the DMG to Apple for notarization, staples the ticket, generates `SHA256SUMS`, creates the
    `v0.0.1` git tag, publishes a GitHub Release with the DMG + checksums + changelog notes,
    and adds the new version's SHA-256 to the release table in `README.md` (committed + pushed).
-3. Verify the published release page, then announce.
+3. Push the release commit (`git push origin HEAD`); the script only pushes the tag.
+4. Verify the published release page, then announce.
 
 ## What makes the download trustworthy
 

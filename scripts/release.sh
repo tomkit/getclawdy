@@ -8,6 +8,8 @@ export PATH="/opt/homebrew/bin:$PATH"
 # release.sh - build, sign, notarize, and publish a Clawdy release.
 #
 # Pipeline:
+#   0. Write the version into project.pbxproj + site/index.html and commit
+#      ("release: vX.Y.Z"), so the tag points at sources that say the right version.
 #   1. Archive the app (xcodebuild) at the given version.
 #   2. Export a Developer ID-signed Clawdy.app.
 #   3. Wrap it in a DMG (drag-to-Applications).
@@ -38,6 +40,20 @@ EXPORT_DIR="${BUILD_DIR}/export"
 DIST_DIR="${BUILD_DIR}/dist"
 DMG_BACKGROUND="${PROJECT_DIR}/dmg-background.png"
 DMG_PATH="${DIST_DIR}/${APP_NAME}.dmg"
+PBXPROJ="Clawdy.xcodeproj/project.pbxproj"
+SITE_HTML="site/index.html"
+
+# Rewrite the version in the checked-in sources under $1 (repo root).
+# Only touches the MARKETING_VERSION / CURRENT_PROJECT_VERSION keys (every build
+# config) and the JSON-LD softwareVersion, so it's safe to re-run.
+write_version() {
+  local root="$1" version="$2" build="$3"
+  sed -i '' -E \
+    -e "s/(MARKETING_VERSION = )[^;]+;/\\1${version};/" \
+    -e "s/(CURRENT_PROJECT_VERSION = )[^;]+;/\\1${build};/" \
+    "${root}/${PBXPROJ}"
+  sed -i '' -E "s/(\"softwareVersion\": \")[^\"]*\"/\\1${version}\"/" "${root}/${SITE_HTML}"
+}
 
 # -- Version --
 if [ $# -lt 1 ]; then
@@ -62,6 +78,17 @@ echo "🚀 Releasing ${APP_NAME} ${TAG} (build ${BUILD_NUMBER}) -> ${GITHUB_REPO
 read -p "   Proceed? (y/N) " -n 1 -r; echo ""
 [[ $REPLY =~ ^[Yy]$ ]] || { echo "   Aborted."; exit 0; }
 
+# -- 0. Sync version into the repo --
+# Commit only these two paths, so unrelated working-tree changes are left alone.
+# Skipped when they already match (re-running for the same version).
+echo "📝 Writing ${VERSION} (${BUILD_NUMBER}) into ${PBXPROJ} and ${SITE_HTML}..."
+write_version "$PROJECT_DIR" "$VERSION" "$BUILD_NUMBER"
+if git -C "$PROJECT_DIR" diff --quiet HEAD -- "$PBXPROJ" "$SITE_HTML"; then
+  echo "   (already at ${VERSION}; nothing to commit)"
+else
+  git -C "$PROJECT_DIR" commit -m "release: ${TAG}" -- "$PBXPROJ" "$SITE_HTML"
+fi
+
 # -- 1. Clean --
 rm -rf "$BUILD_DIR"
 mkdir -p "$EXPORT_DIR" "$DIST_DIR"
@@ -70,14 +97,14 @@ mkdir -p "$EXPORT_DIR" "$DIST_DIR"
 "${PROJECT_DIR}/scripts/fetch-models.sh"
 
 # -- 2. Archive --
+# No version overrides: the archive uses what step 0 committed, so the shipped
+# binary and the tagged sources can't disagree.
 echo "📦 Archiving ${APP_NAME} ${VERSION}..."
 xcodebuild archive \
   -project "${PROJECT_DIR}/Clawdy.xcodeproj" \
   -scheme "$SCHEME" \
   -destination 'generic/platform=macOS' \
   -archivePath "$ARCHIVE_PATH" \
-  MARKETING_VERSION="$VERSION" \
-  CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   2>&1 | tail -5
 
 # -- 3. Export (Developer ID signed) --
@@ -131,6 +158,7 @@ echo "🧾 Generating SHA256SUMS..."
 echo "🏷️  Tagging ${TAG}..."
 git -C "$PROJECT_DIR" tag -a "$TAG" -m "Clawdy ${TAG}" 2>/dev/null || echo "   (tag ${TAG} already exists locally)"
 git -C "$PROJECT_DIR" push origin "$TAG" || echo "   (push the tag manually: git push origin ${TAG})"
+echo "   Push the release commit to your branch too: git push origin HEAD"
 
 # -- 8. GitHub Release (notes pulled from CHANGELOG.md) --
 NOTES=$(awk "/^## \\[${VERSION}\\]/{f=1;next} /^## \\[/{f=0} f" "${PROJECT_DIR}/CHANGELOG.md")
