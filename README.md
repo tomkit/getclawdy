@@ -7,7 +7,7 @@
 <p align="center">Talk to your Mac. Clawdy sees your screen, talks back, and points at things.</p>
 
 <p align="center">
-  <a href="https://getclawdy.com">getclawdy.com</a> ·
+  <a href="https://www.getclawdy.com/">getclawdy.com</a> ·
   <a href="https://github.com/tomkit/getclawdy/releases/latest/download/Clawdy.dmg">Download for Mac</a> ·
   <a href="CHANGELOG.md">Changelog</a>
 </p>

@@ -21,4 +21,4 @@ Clawdy is a menu-bar app for macOS 14.2 or later, built as a universal binary fo
 - [Source code on GitHub](https://github.com/tomkit/getclawdy): MIT licensed
 - [README](https://github.com/tomkit/getclawdy/blob/main/README.md): setup, permissions, and build instructions
 - [Changelog](https://github.com/tomkit/getclawdy/blob/main/CHANGELOG.md): release notes
-- [Website](https://getclawdy.com/)
+- [Website](https://www.getclawdy.com/)
