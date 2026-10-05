@@ -18,7 +18,7 @@
 
 Clawdy is a free, open-source AI cursor assistant for macOS. Hold Control + Option and say what you need, and Clawdy looks at your screen, answers you out loud, and the claw flies to whatever it's talking about. It's a conversation: ask a follow-up, and it remembers what you were just talking about.
 
-Clawdy runs on your own local Claude Code or Codex, using your subscription tokens. No account, nothing extra to pay for, and your voice stays on your Mac. The voice it talks back with is built in too (Kokoro, running on your Mac), so nothing you say or hear leaves the machine.
+Clawdy runs on your own local Claude Code or Codex, using your subscription tokens. No account, nothing extra to pay for, and your voice stays on your Mac. The text-to-speech runs locally on your Mac using Kokoro.
 
 - You talk. Hold the keys and speak. No typing.
 - It sees what you see. Every window, every monitor.
@@ -44,7 +44,7 @@ Say any of these out loud. Clawdy answers out loud and the claw points things ou
 
 ## Example: planning a road trip
 
-Point at your screen and talk. Clawdy answers out loud and the claw flies to what it means.
+Point at your screen and talk. Clawdy answers out loud and the claw flies to point things out.
 
 ![Clawdy planning a coastal route in Aomori](assets/demo-route.gif)
 
@@ -97,6 +97,10 @@ Find a good recipe for: {{task}}. Search the web, pick one, and write ONE self-c
 
 Now say "what can I make with eggs and spinach."
 
+## Voice
+
+Text-to-speech is powered by Kokoro that runs on your Mac. To teach it new pronounciantions, add a line to `~/.clawdy/pronunciations.txt`. Plug in your ElevenLabs API key to bypass this.
+
 ## Build from source
 
 You need macOS 14.2+ and Xcode 16+. 
@@ -105,7 +109,7 @@ You need macOS 14.2+ and Xcode 16+.
 sudo xcode-select -s /Applications/Xcode.app
 git clone https://github.com/tomkit/getclawdy.git
 cd getclawdy
-./scripts/fetch-models.sh   # downloads the ~170 MB Kokoro voice model into Clawdy/Models/ (once)
+./scripts/fetch-models.sh
 open Clawdy.xcodeproj
 ```
 
@@ -128,6 +132,4 @@ What changed in each is in the [changelog](CHANGELOG.md).
 
 ## Credits and license
 
-Clawdy is a fork of [heyclicky](https://heyclicky.com), rebuilt to run on the coding CLI you already have. MIT licensed (`LICENSE`). The built-in voice is [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M); every bundled component and its license is listed in `THIRD-PARTY-LICENSES.md`.
-
-To teach the voice a word (a name, a product), add a line to `~/.clawdy/pronunciations.txt`; the file explains the format.
+MIT licensed (`LICENSE`). Dependencies and their licenses are listed in `THIRD-PARTY-LICENSES.md`.
