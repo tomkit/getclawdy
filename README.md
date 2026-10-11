@@ -56,6 +56,12 @@ Circle the math you're stuck on and ask what it's saying.
 
 ![Clawdy explaining a circled formula in an arXiv paper](assets/demo-formula.gif)
 
+### Checking which settings you need
+
+Circle a group of settings and ask "which of these do I actually need on?" The claw goes through them one at a time.
+
+![Clawdy pointing at the Desktop & Dock toggles in System Settings](assets/demo-settings.gif)
+
 ## Get started
 
 1. [Download Clawdy.dmg](https://github.com/tomkit/getclawdy/releases/latest/download/Clawdy.dmg), open it, drag Clawdy into Applications.
