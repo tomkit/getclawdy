@@ -42,11 +42,25 @@ Clawdy runs on your own local Claude Code or Codex, using your subscription toke
 
 Say any of these out loud. Clawdy answers out loud and the claw points things out. Bigger tasks get handed to your local harness, so everything you've set up there (subagents, prompts, plugins, skills) comes along.
 
-## Example: planning a road trip
+## Examples
 
 Point at your screen and talk. Clawdy answers out loud and the claw flies to point things out.
 
+### Planning a road trip
+
 ![Clawdy planning a coastal route in Aomori](assets/demo-route.gif)
+
+### Explaining a formula in a paper
+
+Circle the math you're stuck on and ask what it's saying.
+
+![Clawdy explaining a circled formula in an arXiv paper](assets/demo-formula.gif)
+
+### Checking which settings you need
+
+Circle a group of settings and ask "which of these do I actually need on?" The claw goes through them one at a time.
+
+![Clawdy pointing at the Desktop & Dock toggles in System Settings](assets/demo-settings.gif)
 
 ## Get started
 
