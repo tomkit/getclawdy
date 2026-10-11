@@ -50,12 +50,6 @@ Point at your screen and talk. Clawdy answers out loud and the claw flies to wha
 
 ![Clawdy planning a coastal route in Aomori](assets/demo-route.gif)
 
-### Looking up a word while you read
-
-Underline a word in your book and ask what it means. You don't have to leave the page.
-
-![Clawdy defining an underlined word in a Kindle book](assets/demo-vocabulary.gif)
-
 ### Explaining a formula in a paper
 
 Circle the math you're stuck on and ask what it's saying.
